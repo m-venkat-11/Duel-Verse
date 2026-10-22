@@ -13,6 +13,7 @@ import { RematchModal } from './components/RematchModal';
 import { QRCodeModal } from './components/QRCodeModal';
 import { ProfileModal } from './components/ProfileModal';
 import { GameSwitcherModal } from './components/GameSwitcherModal';
+import { ToastContainer, type ToastMessage } from './components/Toast';
 
 // Game View Components
 import { TicTacToeView } from './components/games/TicTacToeView';
@@ -35,6 +36,21 @@ export function App() {
   const [showQRModal, setShowQRModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showSwitcherModal, setShowSwitcherModal] = useState<boolean>(false);
+
+  // Toast notifications state
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  const addToast = (type: ToastMessage['type'], title: string, message?: string) => {
+    const id = 'toast_' + Math.random().toString(36).substring(2, 9);
+    setToasts((prev) => [...prev, { id, type, title, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3200);
+  };
+
+  const dismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
 
   // Toggle master sound
   const handleToggleMute = () => {
@@ -412,6 +428,7 @@ export function App() {
             onOpenQR={() => setShowQRModal(true)}
             onOpenTestWindow={handleOpenTestWindow}
             onAddBotRival={handleAddBotRival}
+            onNotifyToast={addToast}
           />
         ) : (
           // Active Gameplay View
@@ -464,6 +481,9 @@ export function App() {
           onSelectGame={handleSwitchGame}
         />
       )}
+
+      {/* Instant Toast Notifications */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
