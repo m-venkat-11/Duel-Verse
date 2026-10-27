@@ -12,4 +12,5 @@ export interface IRoomTransport {
   voteRematch(roomId: string, playerUid: string): Promise<void>;
   switchGame(roomId: string, newGameId: string): Promise<void>;
   resetRoomToLobby(roomId: string): Promise<void>;
+  updateMatchConfig(roomId: string, maxRounds: number, difficulty?: string): Promise<void>;
 }

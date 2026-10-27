@@ -12,34 +12,34 @@ import { createSlapDuelInitialState } from './slapDuelEngine';
 import { createKnifeMasterInitialState } from './knifeMasterEngine';
 import { createSumoSpinInitialState } from './sumoSpinEngine';
 
-export function initializeGameState(gameId: string, playerUids: string[]): any {
+export function initializeGameState(gameId: string, playerUids: string[], targetScore: number = 3): any {
   switch (gameId) {
     case 'tictactoe':
       return createTicTacToeInitialState(playerUids);
     case 'rps':
-      return createRPSInitialState(playerUids, 3);
+      return createRPSInitialState(playerUids, targetScore);
     case 'connectfour':
       return createConnectFourInitialState(playerUids);
     case 'reactionrush':
-      return createReactionRushInitialState(playerUids, 3);
+      return createReactionRushInitialState(playerUids, targetScore);
     case 'pong':
-      return createPongInitialState(playerUids, 5);
+      return createPongInitialState(playerUids, targetScore);
     case 'obstaclerush':
-      return createObstacleRushInitialState(playerUids, 3);
+      return createObstacleRushInitialState(playerUids, targetScore);
     case 'memorymatch':
       return createMemoryMatchInitialState(playerUids);
     case 'numberblitz':
       return createNumberBlitzInitialState(playerUids, 45);
     case 'tapfrenzy':
-      return createTapFrenzyInitialState(playerUids, 3);
+      return createTapFrenzyInitialState(playerUids, targetScore);
     case 'tankduel':
-      return createTankDuelInitialState(playerUids, 3);
+      return createTankDuelInitialState(playerUids, targetScore);
     case 'slapduel':
-      return createSlapDuelInitialState(playerUids, 5);
+      return createSlapDuelInitialState(playerUids, targetScore);
     case 'knifemaster':
-      return createKnifeMasterInitialState(playerUids, 3);
+      return createKnifeMasterInitialState(playerUids, targetScore);
     case 'sumospin':
-      return createSumoSpinInitialState(playerUids, 3);
+      return createSumoSpinInitialState(playerUids, targetScore);
     default:
       return createTicTacToeInitialState(playerUids);
   }

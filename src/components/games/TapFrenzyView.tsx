@@ -82,7 +82,7 @@ export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({
 
     // Multiplier bonus if in Frenzy state
     const multiplier = frenzy ? 1.5 : 1.0;
-    onDispatchAction('TAP_WAR_MASH', { playerUid, p1Uid, multiplier });
+    onDispatchAction('TAP_WAR_MASH', { playerUid, actingUid: playerUid, p1Uid, multiplier });
   };
 
   // Keyboard controls
@@ -104,19 +104,19 @@ export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({
   useEffect(() => {
     if (!isHost || !isBotPlaying || gameState.roundWinner !== null) return;
 
-    // Mash speed intervals (every 90ms to 140ms = 7-11 CPS)
+    // Mash speed intervals (every 90ms to 130ms = 8-11 CPS)
     const interval = setInterval(() => {
-      if (Math.random() < 0.88) {
-        onDispatchAction('TAP_WAR_MASH', { playerUid: p2Uid, p1Uid, multiplier: 1.0 });
+      if (Math.random() < 0.90) {
+        onDispatchAction('TAP_WAR_MASH', { playerUid: p2Uid, actingUid: p2Uid, p1Uid, multiplier: 1.0 });
       }
-    }, 110);
+    }, 105);
 
     return () => clearInterval(interval);
   }, [isHost, isBotPlaying, p1Uid, p2Uid, gameState.roundWinner, onDispatchAction]);
 
   const p1Wins = gameState.scores?.[p1Uid] || 0;
   const p2Wins = gameState.scores?.[p2Uid] || 0;
-  const targetWins = gameState.targetWins || 3;
+  const targetWins = room.maxRounds || gameState.targetWins || 3;
 
   return (
     <div className="w-full max-w-xl mx-auto flex flex-col items-center select-none gap-3 px-2">

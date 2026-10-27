@@ -90,7 +90,7 @@ export class BroadcastTransport implements IRoomTransport {
     hostPlayer.isConnected = true;
     hostPlayer.lastPing = now;
 
-    const initialGameState = initializeGameState(initialGameId, [hostPlayer.uid]);
+    const initialGameState = initializeGameState(initialGameId, [hostPlayer.uid], maxRounds);
 
     const room: AuthoritativeRoomState = {
       roomId,
@@ -158,7 +158,7 @@ export class BroadcastTransport implements IRoomTransport {
 
     // Reinitialize game state for both players
     const playerUids = Object.keys(room.players);
-    room.gameState = initializeGameState(room.selectedGameId, playerUids);
+    room.gameState = initializeGameState(room.selectedGameId, playerUids, room.maxRounds || 3);
 
     this.saveAndBroadcast(room);
     return { success: true };
@@ -243,7 +243,7 @@ export class BroadcastTransport implements IRoomTransport {
     if (!room) return;
 
     const playerUids = Object.keys(room.players);
-    room.gameState = initializeGameState(room.selectedGameId, playerUids);
+    room.gameState = initializeGameState(room.selectedGameId, playerUids, room.maxRounds || 3);
     room.status = 'playing';
     room.currentRound = 1;
     room.roundWinnerUid = null;
@@ -299,7 +299,7 @@ export class BroadcastTransport implements IRoomTransport {
       room.currentRound = 1;
       room.roundWinnerUid = null;
       room.matchWinnerUid = null;
-      room.gameState = initializeGameState(room.selectedGameId, playerUids);
+      room.gameState = initializeGameState(room.selectedGameId, playerUids, room.maxRounds || 3);
       room.status = 'playing';
     }
 
@@ -321,7 +321,7 @@ export class BroadcastTransport implements IRoomTransport {
     room.currentRound = 1;
     room.roundWinnerUid = null;
     room.matchWinnerUid = null;
-    room.gameState = initializeGameState(newGameId, playerUids);
+    room.gameState = initializeGameState(newGameId, playerUids, room.maxRounds || 3);
     room.status = 'playing';
 
     this.saveAndBroadcast(room);
@@ -340,7 +340,23 @@ export class BroadcastTransport implements IRoomTransport {
     room.rematchVotes = {};
     room.roundWinnerUid = null;
     room.matchWinnerUid = null;
+    room.gameState = initializeGameState(room.selectedGameId, playerUids, room.maxRounds || 3);
 
+    this.saveAndBroadcast(room);
+  }
+
+  public async updateMatchConfig(roomId: string, maxRounds: number, difficulty?: string): Promise<void> {
+    const formattedId = roomId.toUpperCase().trim();
+    const room = this.getStoredRoom(formattedId);
+    if (!room) return;
+
+    room.maxRounds = maxRounds;
+    if (difficulty) {
+      room.gameConfig.difficulty = difficulty as any;
+    }
+    const playerUids = Object.keys(room.players);
+    room.gameState = initializeGameState(room.selectedGameId, playerUids, maxRounds);
+    room.updatedAt = Date.now();
     this.saveAndBroadcast(room);
   }
 
@@ -349,10 +365,23 @@ export class BroadcastTransport implements IRoomTransport {
     if (!room) return;
 
     const playerUids = Object.keys(room.players);
-    const { type, playerUid, payload } = action;
+    const { type, payload } = action;
+    const playerUid = payload?.actingUid || payload?.playerUid || action.playerUid;
 
     // Authoritative Action Reducers
     switch (type) {
+      // --- Match Configuration Update ---
+      case 'SET_MATCH_CONFIG': {
+        const { maxRounds, difficulty } = payload;
+        if (maxRounds) {
+          room.maxRounds = maxRounds;
+          room.gameState = initializeGameState(room.selectedGameId, playerUids, maxRounds);
+        }
+        if (difficulty) {
+          room.gameConfig.difficulty = difficulty;
+        }
+        break;
+      }
       // --- Tic-Tac-Toe Move ---
       case 'TICTACTOE_MOVE': {
         const { cellIndex } = payload;
@@ -512,7 +541,7 @@ export class BroadcastTransport implements IRoomTransport {
         const { scorerUid } = payload;
         if (scorerUid && room.players[scorerUid]) {
           room.scores[scorerUid] = (room.scores[scorerUid] || 0) + 1;
-          const targetScore = room.gameState?.targetScore || 5;
+          const targetScore = room.maxRounds || room.gameState?.targetScore || 5;
           if (room.scores[scorerUid] >= targetScore) {
             room.status = 'match_end';
             room.matchWinnerUid = scorerUid;
@@ -621,9 +650,10 @@ export class BroadcastTransport implements IRoomTransport {
         room.gameState = res.newState;
         if (winnerUid && room.players[winnerUid]) {
           room.scores[winnerUid] = (room.scores[winnerUid] || 0) + 1;
-          if (res.matchOver) {
+          const targetWins = room.maxRounds || room.gameState?.targetWins || 3;
+          if (res.matchOver || room.scores[winnerUid] >= targetWins) {
             room.status = 'match_end';
-            room.matchWinnerUid = res.matchWinnerUid;
+            room.matchWinnerUid = winnerUid;
           }
         }
         break;
@@ -691,7 +721,7 @@ export class BroadcastTransport implements IRoomTransport {
         room.currentRound += 1;
         room.status = 'playing';
         room.roundWinnerUid = null;
-        room.gameState = initializeGameState(room.selectedGameId, playerUids);
+        room.gameState = initializeGameState(room.selectedGameId, playerUids, room.maxRounds || 3);
         break;
       }
 

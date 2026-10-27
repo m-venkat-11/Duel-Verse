@@ -216,4 +216,8 @@ export class FirebaseTransport implements IRoomTransport {
   public async resetRoomToLobby(roomId: string): Promise<void> {
     return this.fallback.resetRoomToLobby(roomId);
   }
+
+  public async updateMatchConfig(roomId: string, maxRounds: number, difficulty?: string): Promise<void> {
+    return this.fallback.updateMatchConfig(roomId, maxRounds, difficulty);
+  }
 }

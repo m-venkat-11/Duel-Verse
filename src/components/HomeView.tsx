@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Plus, ArrowRight, Users, Flame, Gamepad2, HelpCircle, Swords, Zap, Sparkles } from 'lucide-react';
-import { GAMES_CATALOG, type GameCategory } from '../config/games';
+import { Plus, ArrowRight, Users, Flame, Gamepad2, HelpCircle, Swords, Zap, Sparkles, X, Trophy, Minus, Bot } from 'lucide-react';
+import { GAMES_CATALOG, type GameCategory, type GameMetadata } from '../config/games';
 import { GameCard } from './GameCard';
+import { GameArtwork } from './artwork/GameArtwork';
 import { soundService } from '../services/sound';
 import { getPlayerRank, type LocalPlayerProfile } from '../services/player';
 
@@ -23,19 +24,29 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const [isJoinExpanded, setIsJoinExpanded] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Match Customization Setup Modal state
+  const [setupGame, setSetupGame] = useState<GameMetadata | null>(null);
+  const [setupWithBot, setSetupWithBot] = useState<boolean>(false);
+  const [setupPoints, setSetupPoints] = useState<number>(3);
+
   const filteredGames = GAMES_CATALOG.filter((g) => {
     if (selectedCategory === 'all') return true;
     return g.category === selectedCategory;
   });
 
-  const handleCreateDefault = (gameId: string = 'tankduel') => {
+  const handleOpenSetup = (gameId: string = 'tankduel', withBot: boolean = false) => {
     soundService.playClick();
-    onCreateRoom(gameId, 3, false);
+    const g = GAMES_CATALOG.find((item) => item.id === gameId) || GAMES_CATALOG[0];
+    setSetupGame(g);
+    setSetupWithBot(withBot);
+    setSetupPoints(3);
   };
 
-  const handlePlayVsBot = (gameId: string = 'tankduel') => {
+  const handleLaunchDuel = () => {
+    if (!setupGame) return;
     soundService.playClick();
-    onCreateRoom(gameId, 3, true);
+    onCreateRoom(setupGame.id, setupPoints, setupWithBot);
+    setSetupGame(null);
   };
 
   const handleJoinSubmit = (e: React.FormEvent) => {
@@ -115,7 +126,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
             <button
               id="btn-quick-bot"
-              onClick={() => handlePlayVsBot('tankduel')}
+              onClick={() => handleOpenSetup('tankduel', true)}
               className="btn-arcade btn-arcade-cyan px-6 py-3.5 text-base font-black flex items-center justify-center gap-2 shadow-xl shadow-cyan-600/30 active:scale-95 transition"
             >
               <span>🤖 INSTANT VS CYBERBOT</span>
@@ -123,7 +134,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
             <button
               id="btn-create-room"
-              onClick={() => handleCreateDefault('tankduel')}
+              onClick={() => handleOpenSetup('tankduel', false)}
               className="btn-arcade btn-arcade-rose px-6 py-3.5 text-base font-black flex items-center justify-center gap-2 shadow-xl shadow-rose-600/30 active:scale-95 transition"
             >
               <Plus className="w-5 h-5 stroke-[3]" />
@@ -283,8 +294,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <GameCard
               key={game.id}
               game={game}
-              onSelect={(gameId) => handleCreateDefault(gameId)}
-              onPlayVsAi={(gameId) => handlePlayVsBot(gameId)}
+              onSelect={(gameId) => handleOpenSetup(gameId, false)}
+              onPlayVsAi={(gameId) => handleOpenSetup(gameId, true)}
             />
           ))}
         </div>
@@ -354,6 +365,142 @@ export const HomeView: React.FC<HomeViewProps> = ({
           Powered by authoritative state synchronization and Web Audio API synthesis.
         </p>
       </footer>
+
+      {/* MATCH CUSTOMIZATION SETUP MODAL */}
+      {setupGame && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
+          <div className="glass-panel max-w-lg w-full p-5 sm:p-6 relative border border-cyan-500/40 shadow-2xl flex flex-col rounded-3xl bg-slate-950">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <Swords className="w-5 h-5 text-cyan-400" />
+                <h3 className="text-xl font-black font-['Outfit'] text-white">
+                  Duel Customization
+                </h3>
+              </div>
+              <button
+                onClick={() => setSetupGame(null)}
+                className="p-1.5 rounded-full bg-slate-800 text-slate-400 hover:text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Game Preview Capsule */}
+            <div className="flex items-center gap-3.5 my-4 p-3 rounded-2xl bg-slate-900 border border-slate-800">
+              <div className="w-24 aspect-[16/9] rounded-xl overflow-hidden shrink-0 border border-white/10">
+                <GameArtwork gameId={setupGame.id} size="sm" />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-base font-extrabold text-white font-['Outfit'] truncate">
+                  {setupGame.title}
+                </h4>
+                <p className="text-xs text-slate-400 truncate mt-0.5">{setupGame.tagline}</p>
+                <span className="inline-block mt-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-bold uppercase">
+                  {setupGame.category}
+                </span>
+              </div>
+            </div>
+
+            {/* Opponent Mode Selector */}
+            <div className="mb-4">
+              <span className="text-xs font-mono text-slate-400 uppercase font-bold block mb-2">
+                Choose Rival Mode:
+              </span>
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  onClick={() => { soundService.playClick(); setSetupWithBot(false); }}
+                  className={`p-3 rounded-2xl border text-xs font-black font-['Outfit'] flex items-center justify-center gap-2 transition ${
+                    !setupWithBot
+                      ? 'bg-rose-600/30 border-rose-500 text-white shadow-lg shadow-rose-600/20'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-4 h-4 text-rose-400" />
+                  <span>Play with Friend</span>
+                </button>
+                <button
+                  onClick={() => { soundService.playClick(); setSetupWithBot(true); }}
+                  className={`p-3 rounded-2xl border text-xs font-black font-['Outfit'] flex items-center justify-center gap-2 transition ${
+                    setupWithBot
+                      ? 'bg-cyan-600/30 border-cyan-500 text-white shadow-lg shadow-cyan-600/20'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Bot className="w-4 h-4 text-cyan-400" />
+                  <span>Play vs CyberBot</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Win Condition / Points Customization */}
+            <div className="mb-5 p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-mono text-slate-300 uppercase font-bold flex items-center gap-1.5">
+                  <Trophy className="w-4 h-4 text-amber-400" />
+                  Points to Win Match:
+                </span>
+                <span className="text-sm font-black font-mono text-amber-400">
+                  First to {setupPoints}
+                </span>
+              </div>
+
+              {/* Stepper + Presets */}
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <button
+                  onClick={() => {
+                    soundService.playClick();
+                    setSetupPoints(Math.max(1, setupPoints - 1));
+                  }}
+                  disabled={setupPoints <= 1}
+                  className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white flex items-center justify-center font-black border border-slate-700 active:scale-95 transition"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+                <div className="flex-1 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-center font-mono font-black text-amber-300 text-base">
+                  {setupPoints} {setupPoints === 1 ? 'POINT' : 'POINTS'}
+                </div>
+                <button
+                  onClick={() => {
+                    soundService.playClick();
+                    setSetupPoints(Math.min(15, setupPoints + 1));
+                  }}
+                  disabled={setupPoints >= 15}
+                  className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white flex items-center justify-center font-black border border-slate-700 active:scale-95 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Quick Pills */}
+              <div className="grid grid-cols-4 gap-2">
+                {[1, 3, 5, 10].map((pts) => (
+                  <button
+                    key={pts}
+                    onClick={() => { soundService.playClick(); setSetupPoints(pts); }}
+                    className={`py-1.5 rounded-xl text-xs font-bold font-mono transition ${
+                      setupPoints === pts
+                        ? 'bg-amber-500 text-slate-950 font-black shadow-md'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {pts === 1 ? '⚡ 1 Pt' : `${pts} Pts`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Launch Action */}
+            <button
+              onClick={handleLaunchDuel}
+              className="w-full btn-arcade btn-arcade-rose py-4 text-base font-black flex items-center justify-center gap-2 shadow-2xl active:scale-95 transition"
+            >
+              <Swords className="w-5 h-5 stroke-[2.5]" />
+              <span>ENTER ARENA (FIRST TO {setupPoints})</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

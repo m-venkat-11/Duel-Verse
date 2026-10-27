@@ -207,7 +207,7 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
 
         if (controlMode === 'onebutton') {
           // Play Store 1-Button Mode: Hold to move forward, release to rotate!
-          const isHolding = mobileControls.current.oneButtonDown || keysDown.current[' '] || keysDown.current['w'];
+          const isHolding = mobileControls.current.oneButtonDown || keysDown.current['w'] || keysDown.current['arrowup'];
           if (isHolding) {
             const nextX = myTank.x + Math.cos(myTank.angle) * MOVE_SPEED;
             const nextY = myTank.y + Math.sin(myTank.angle) * MOVE_SPEED;
@@ -229,7 +229,14 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
               treadMarks.push({ x: myTank.x, y: myTank.y, angle: myTank.angle, alpha: 0.5 });
             }
           } else {
-            myTank.angle += ROT_SPEED * 1.2;
+            myTank.angle += ROT_SPEED * 1.25;
+          }
+
+          // Firing in 1-button mode
+          const isFire = keysDown.current[' '] || keysDown.current['enter'] || mobileControls.current.fire;
+          if (isFire && myTank.reload === 0) {
+            fireBullet(playerUid);
+            mobileControls.current.fire = false;
           }
         } else {
           // Classic D-Pad / Keyboard Controls
@@ -372,7 +379,7 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
           }
         }
 
-        if (b.bounces > 2) {
+        if (b.bounces > 4) {
           b.alive = false;
           continue;
         }
@@ -396,7 +403,12 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
             soundService.playGoal();
 
             if (isHost) {
-              onDispatchAction('TANK_KILL', { killerUid: victorUid, victimUid: uid });
+              onDispatchAction('TANK_KILL', {
+                killerUid: victorUid,
+                victimUid: uid,
+                playerUid: victorUid,
+                actingUid: victorUid
+              });
             }
             break;
           }
@@ -637,20 +649,37 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
 
       {/* Tactile Mobile Controls */}
       {controlMode === 'onebutton' ? (
-        <div className="w-full max-w-md flex flex-col items-center pt-2">
+        <div className="w-full max-w-md grid grid-cols-2 gap-3 pt-2">
+          {/* Drive & Rotate Button */}
           <button
             onPointerDown={() => { mobileControls.current.oneButtonDown = true; }}
             onPointerUp={() => { mobileControls.current.oneButtonDown = false; }}
             onPointerLeave={() => { mobileControls.current.oneButtonDown = false; }}
-            className="w-full h-20 rounded-3xl bg-gradient-to-r from-amber-500 via-rose-500 to-cyan-500 p-0.5 shadow-2xl active:scale-95 transition"
+            className="w-full h-20 rounded-3xl bg-gradient-to-r from-amber-500 to-orange-500 p-0.5 shadow-xl active:scale-95 transition"
           >
-            <div className="w-full h-full rounded-[22px] bg-slate-950 flex flex-col items-center justify-center">
-              <span className="text-lg font-black font-['Outfit'] text-white tracking-wider flex items-center gap-2">
-                <Flame className="w-5 h-5 text-amber-400 animate-pulse" />
-                HOLD TO DRIVE • RELEASE TO TURN
+            <div className="w-full h-full rounded-[22px] bg-slate-950 flex flex-col items-center justify-center p-2 text-center">
+              <span className="text-sm sm:text-base font-black font-['Outfit'] text-white tracking-wider flex items-center gap-1.5">
+                <Flame className="w-4 h-4 text-amber-400 animate-pulse" />
+                DRIVE & TURN
               </span>
-              <span className="text-[11px] text-slate-400 font-mono mt-0.5">
-                Auto-fires bouncing plasma shells!
+              <span className="text-[10px] text-slate-400 font-mono mt-0.5">
+                Hold = Drive • Release = Turn
+              </span>
+            </div>
+          </button>
+
+          {/* Fire Cannon Button */}
+          <button
+            onClick={() => { mobileControls.current.fire = true; }}
+            className="w-full h-20 rounded-3xl bg-gradient-to-r from-rose-500 to-amber-500 p-0.5 shadow-xl active:scale-95 transition"
+          >
+            <div className="w-full h-full rounded-[22px] bg-slate-950 flex flex-col items-center justify-center p-2 text-center">
+              <span className="text-sm sm:text-base font-black font-['Outfit'] text-white tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-rose-400 animate-bounce" />
+                FIRE CANNON
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono mt-0.5">
+                4-Bounce Plasma Shell
               </span>
             </div>
           </button>

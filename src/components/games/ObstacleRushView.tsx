@@ -146,7 +146,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({
           setWinnerName(winnerUid === p1Uid ? p1Nickname : p2Nickname);
           soundService.playVictory();
           if (isHost) {
-            onDispatchAction('RUNNER_FINISH', { winnerUid });
+            onDispatchAction('RUNNER_FINISH', { winnerUid, actingUid: winnerUid });
           }
         }
       }
@@ -331,6 +331,22 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({
 
   return (
     <div ref={containerRef} className="w-full max-w-2xl mx-auto flex flex-col items-center select-none gap-2.5 px-2">
+      {/* Match Score & Target Banner */}
+      <div className="w-full flex items-center justify-between px-4 py-2 rounded-2xl bg-slate-900/90 border border-slate-700/60 text-xs font-mono font-bold shadow-md">
+        <div className="flex items-center gap-2 text-amber-400">
+          <span>{p1Nickname}:</span>
+          <span className="text-white text-base font-black">{room.scores[p1Uid] || 0}</span>
+        </div>
+        <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-orange-950/60 border border-orange-500/30 text-[11px] text-orange-300">
+          <span>🏆 TARGET:</span>
+          <span className="text-white font-black">FIRST TO {room.maxRounds || gameState.targetWins || 3}</span>
+        </div>
+        <div className="flex items-center gap-2 text-cyan-400">
+          <span>{p2Nickname}:</span>
+          <span className="text-white text-base font-black">{room.scores[p2Uid] || 0}</span>
+        </div>
+      </div>
+
       {/* Race Progress Bar */}
       <div className="w-full p-3 rounded-2xl bg-slate-900/90 border border-slate-700/60 shadow-md">
         <div className="flex items-center justify-between text-xs font-mono font-bold mb-1.5">

@@ -12,7 +12,12 @@ import {
   Sparkles,
   Smartphone,
   LogOut,
-  Swords
+  Swords,
+  Trophy,
+  Minus,
+  Plus,
+  Sliders,
+  Zap
 } from 'lucide-react';
 import { getGameMetadata } from '../config/games';
 import { GameArtwork } from './artwork/GameArtwork';
@@ -29,6 +34,9 @@ interface LobbyViewProps {
   onLeaveRoom: () => void;
   onOpenTestWindow?: () => void;
   onAddBotRival?: () => void;
+  onUpdateMatchConfig?: (maxRounds: number, difficulty?: string) => void;
+  botDifficulty?: 'casual' | 'pro' | 'master';
+  onSelectBotDifficulty?: (diff: 'casual' | 'pro' | 'master') => void;
   onNotifyToast?: (type: 'success' | 'info' | 'warning', title: string, msg?: string) => void;
 }
 
@@ -42,6 +50,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   onLeaveRoom,
   onOpenTestWindow,
   onAddBotRival,
+  onUpdateMatchConfig,
+  botDifficulty,
+  onSelectBotDifficulty,
   onNotifyToast
 }) => {
   const [copiedCode, setCopiedCode] = useState(false);
@@ -385,6 +396,134 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             <Grid className="w-4 h-4 text-violet-400" />
             <span>SWITCH GAME</span>
           </button>
+        </div>
+      </div>
+
+      {/* 3.5. MATCH RULES & POINTS CUSTOMIZATION PANEL */}
+      <div className="w-full glass-panel p-4 sm:p-5 border border-cyan-500/30 rounded-3xl mb-6 shadow-2xl relative overflow-hidden bg-slate-900/80">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-white/10 pb-3">
+            <div className="flex items-center gap-2">
+              <Trophy className="w-5 h-5 text-amber-400" />
+              <span className="font-black text-white font-['Outfit'] text-base sm:text-lg">
+                MATCH RULES & WIN CONDITION
+              </span>
+            </div>
+            <div className="text-xs font-mono font-bold">
+              {isHost ? (
+                <span className="text-cyan-400">👑 Host can customize rules below</span>
+              ) : (
+                <span className="text-amber-400">👑 Set by Room Host</span>
+              )}
+            </div>
+          </div>
+
+          {/* Stepper + Presets */}
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-mono text-slate-400 uppercase font-bold">Target Score:</span>
+              <div className="flex items-center gap-2">
+                {isHost && (
+                  <button
+                    onClick={() => {
+                      soundService.playClick();
+                      const next = Math.max(1, (room.maxRounds || 3) - 1);
+                      onUpdateMatchConfig?.(next);
+                    }}
+                    disabled={room.maxRounds <= 1}
+                    className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white flex items-center justify-center font-black transition border border-slate-700 active:scale-95"
+                    title="Decrease points to win"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                )}
+                <div className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-400/50 text-amber-300 font-mono font-black text-sm sm:text-base shadow-inner">
+                  FIRST TO {room.maxRounds || 3} {room.maxRounds === 1 ? 'POINT' : 'POINTS'}
+                </div>
+                {isHost && (
+                  <button
+                    onClick={() => {
+                      soundService.playClick();
+                      const next = Math.min(15, (room.maxRounds || 3) + 1);
+                      onUpdateMatchConfig?.(next);
+                    }}
+                    disabled={room.maxRounds >= 15}
+                    className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white flex items-center justify-center font-black transition border border-slate-700 active:scale-95"
+                    title="Increase points to win"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Quick Presets */}
+            <div className="flex flex-wrap items-center gap-2">
+              {[1, 3, 5, 7, 10].map((pts) => {
+                const isActive = (room.maxRounds || 3) === pts;
+                return (
+                  <button
+                    key={pts}
+                    disabled={!isHost}
+                    onClick={() => {
+                      soundService.playClick();
+                      onUpdateMatchConfig?.(pts);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black font-['Outfit'] transition-all ${
+                      isActive
+                        ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30 scale-105'
+                        : isHost
+                        ? 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700'
+                        : 'bg-slate-900/60 text-slate-500 border border-slate-800 cursor-default'
+                    }`}
+                  >
+                    {pts === 1 ? '⚡ 1 Pt (Sudden Death)' : `${pts} Pts`}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Bot Difficulty Selector if Bot is in the room */}
+          {(room.players['bot_rival'] || Boolean(p2 && p2.uid.includes('bot'))) && (
+            <div className="pt-3 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Bot className="w-4 h-4 text-cyan-400" />
+                <span className="text-xs font-mono font-bold text-slate-300 uppercase">
+                  CyberBot AI Skill Level:
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {(['casual', 'pro', 'master'] as const).map((diff) => {
+                  const isSel = (botDifficulty || 'master') === diff;
+                  return (
+                    <button
+                      key={diff}
+                      disabled={!isHost}
+                      onClick={() => {
+                        soundService.playClick();
+                        onSelectBotDifficulty?.(diff);
+                        onUpdateMatchConfig?.(room.maxRounds || 3, diff);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-mono font-black uppercase tracking-wider transition ${
+                        isSel
+                          ? diff === 'master'
+                            ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/30 scale-105'
+                            : diff === 'pro'
+                            ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/30 scale-105'
+                            : 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30 scale-105'
+                          : isHost
+                          ? 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'
+                          : 'bg-slate-900 text-slate-600 border border-slate-800 cursor-default'
+                      }`}
+                    >
+                      {diff === 'casual' ? '🟢 Casual' : diff === 'pro' ? '🟡 Pro' : '🔴 Master'}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

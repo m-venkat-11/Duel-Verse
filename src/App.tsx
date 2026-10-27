@@ -140,7 +140,7 @@ export function App() {
     const botUid = 'bot_rival';
     const gs = room.gameState;
 
-    // 1. Tic-Tac-Toe (Unbeatable Minimax on Master)
+    // 1. Tic-Tac-Toe (Unbeatable Minimax on Master, snappy 200ms delay)
     if (room.selectedGameId === 'tictactoe' && gs.currentTurn === botUid && !gs.winningLine && !gs.isDraw) {
       const choice = getCyberBotTicTacToeMove(gs.board, botUid, profile.uid, botDifficulty);
       if (choice !== -1) {
@@ -149,15 +149,15 @@ export function App() {
             type: 'TICTACTOE_MOVE',
             roomId: room.roomId,
             playerUid: botUid,
-            payload: { cellIndex: choice },
+            payload: { cellIndex: choice, actingUid: botUid },
             timestamp: Date.now()
           });
-        }, 420);
+        }, 220);
         return () => clearTimeout(timer);
       }
     }
 
-    // 2. Connect Four (Tactical Multi-step Lookahead)
+    // 2. Connect Four (Tactical Multi-step Lookahead, fast 240ms drop)
     if (room.selectedGameId === 'connectfour' && gs.currentTurn === botUid && !gs.winningCoords) {
       const choice = getCyberBotConnectFourMove(gs.grid, botUid, profile.uid, botDifficulty);
       if (choice !== -1) {
@@ -166,18 +166,17 @@ export function App() {
             type: 'CONNECTFOUR_DROP',
             roomId: room.roomId,
             playerUid: botUid,
-            payload: { col: choice },
+            payload: { col: choice, actingUid: botUid },
             timestamp: Date.now()
           });
-        }, 480);
+        }, 240);
         return () => clearTimeout(timer);
       }
     }
 
-    // 3. Rock Paper Scissors (Adaptive Psychological Markov Prediction)
+    // 3. Rock Paper Scissors (Adaptive Psychological Prediction, 180ms reveal)
     if (room.selectedGameId === 'rps') {
       if (gs.phase === 'revealed' && gs.choices[profile.uid] && gs.choices[botUid]) {
-        // Track round history
         const lastEntry = rpsHistoryRef.current[rpsHistoryRef.current.length - 1];
         if (!lastEntry || lastEntry.humanChoice !== gs.choices[profile.uid]) {
           rpsHistoryRef.current.push({
@@ -193,15 +192,15 @@ export function App() {
             type: 'RPS_CHOOSE',
             roomId: room.roomId,
             playerUid: botUid,
-            payload: { choice },
+            payload: { choice, actingUid: botUid },
             timestamp: Date.now()
           });
-        }, 450);
+        }, 200);
         return () => clearTimeout(timer);
       }
     }
 
-    // 4. Reaction Rush (Superhuman sub-210ms reflex on Master)
+    // 4. Reaction Rush (Sub-200ms reflex on Master)
     if (room.selectedGameId === 'reactionrush' && gs.phase === 'countdown' && !gs.reactionTimes?.[botUid]) {
       const delayUntilSignal = Math.max(0, gs.signalScheduledAt - Date.now());
       const botReactionMs = getCyberBotReactionDelay(botDifficulty);
@@ -210,7 +209,7 @@ export function App() {
           type: 'REACTION_TAP',
           roomId: room.roomId,
           playerUid: botUid,
-          payload: { tapTimestamp: Date.now() },
+          payload: { tapTimestamp: Date.now(), actingUid: botUid },
           timestamp: Date.now()
         });
       }, delayUntilSignal + botReactionMs);
@@ -222,23 +221,23 @@ export function App() {
       const botQIdx = gs.playerQuestionIndex?.[botUid] || 0;
       const q = gs.questions?.[botQIdx];
       if (q) {
-        const { chosenIndex, delayMs } = getCyberBotMathAnswer(q.correctIndex, botDifficulty);
+        const { chosenIndex } = getCyberBotMathAnswer(q.correctIndex, botDifficulty);
+        const blitzDelay = botDifficulty === 'master' ? 450 + Math.random() * 300 : 700 + Math.random() * 500;
         const timer = setTimeout(() => {
           activeTransport.dispatchAction({
             type: 'BLITZ_ANSWER',
             roomId: room.roomId,
             playerUid: botUid,
-            payload: { chosenIndex },
+            payload: { chosenIndex, actingUid: botUid },
             timestamp: Date.now()
           });
-        }, delayMs);
+        }, blitzDelay);
         return () => clearTimeout(timer);
       }
     }
 
-    // 6. Memory Match (Photographic Neural Memory Tracking)
+    // 6. Memory Match (Photographic Neural Memory Tracking, 240ms flips)
     if (room.selectedGameId === 'memorymatch') {
-      // Remember any cards currently revealed or flipped by either player
       gs.cards?.forEach((c: any, idx: number) => {
         const isFlippedByHuman = gs.playerFlips?.[profile.uid]?.includes(idx);
         const isFlippedByBot = gs.playerFlips?.[botUid]?.includes(idx);
@@ -256,7 +255,6 @@ export function App() {
 
         if (unmatched && unmatched.length > 0) {
           if (flips.length === 1) {
-            // Card 1 is already flipped: does Bot remember where its twin is?
             const card1 = gs.cards[flips[0]];
             if (card1) {
               for (const [knownIdx, pairId] of cardMemoryRef.current.entries()) {
@@ -267,7 +265,6 @@ export function App() {
               }
             }
           } else if (flips.length === 0) {
-            // Check if Bot already knows any pair in memory
             const pairMap: Record<string, number[]> = {};
             for (const [knownIdx, pairId] of cardMemoryRef.current.entries()) {
               if (!gs.cards[knownIdx]?.isMatched) {
@@ -284,7 +281,6 @@ export function App() {
           }
 
           if (chosenCardIndex === -1) {
-            // Pick unvisited card if possible, else random unmatched
             const unvisited = unmatched.filter((idx: number) => !cardMemoryRef.current.has(idx));
             chosenCardIndex = unvisited.length > 0
               ? unvisited[Math.floor(Math.random() * unvisited.length)]
@@ -296,10 +292,10 @@ export function App() {
               type: 'MEMORY_FLIP',
               roomId: room.roomId,
               playerUid: botUid,
-              payload: { cardIndex: chosenCardIndex },
+              payload: { cardIndex: chosenCardIndex, actingUid: botUid },
               timestamp: Date.now()
             });
-          }, 450);
+          }, 240);
           return () => clearTimeout(timer);
         }
       }
@@ -410,13 +406,17 @@ export function App() {
 
   // Dispatch game action to authoritative engine
   const handleDispatchAction = useCallback(
-    (actionType: string, payload: any) => {
+    (actionType: string, payload: any, actingUid?: string) => {
       if (!room) return;
+      const effectiveUid = actingUid || payload?.actingUid || payload?.playerUid || profile.uid;
       activeTransport.dispatchAction({
         type: actionType,
         roomId: room.roomId,
-        playerUid: profile.uid,
-        payload,
+        playerUid: effectiveUid,
+        payload: {
+          ...payload,
+          actingUid: effectiveUid
+        },
         timestamp: Date.now(),
         expectedVersion: room.stateVersion
       });
@@ -440,6 +440,15 @@ export function App() {
   const handleReturnToLobby = async () => {
     if (!room) return;
     await activeTransport.resetRoomToLobby(room.roomId);
+  };
+
+  // Update Match Configuration (Target Score & Bot Skill)
+  const handleUpdateMatchConfig = async (maxRounds: number, difficulty?: string) => {
+    if (!room) return;
+    if (difficulty) {
+      setBotDifficulty(difficulty as BotDifficulty);
+    }
+    await activeTransport.updateMatchConfig(room.roomId, maxRounds, difficulty);
   };
 
   // Test in second window (instant dual-player simulation)
@@ -630,6 +639,9 @@ export function App() {
             onOpenTestWindow={handleOpenTestWindow}
             onAddBotRival={handleAddBotRival}
             onLeaveRoom={handleLeaveRoom}
+            onUpdateMatchConfig={handleUpdateMatchConfig}
+            botDifficulty={botDifficulty}
+            onSelectBotDifficulty={(d) => setBotDifficulty(d)}
             onNotifyToast={addToast}
           />
         ) : (

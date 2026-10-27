@@ -368,7 +368,7 @@ export const PongView: React.FC<PongViewProps> = ({
             juice.addTrauma(0.65);
             juice.emitExplosion((sim.puckX / 100) * W, 20, 50);
             soundService.playGoal();
-            onDispatchAction('PONG_GOAL', { scorerUid: bottomUid });
+            onDispatchAction('PONG_GOAL', { scorerUid: bottomUid, actingUid: bottomUid });
             break;
           }
 
@@ -385,7 +385,7 @@ export const PongView: React.FC<PongViewProps> = ({
             juice.addTrauma(0.65);
             juice.emitExplosion((sim.puckX / 100) * W, H - 20, 50);
             soundService.playGoal();
-            onDispatchAction('PONG_GOAL', { scorerUid: topUid });
+            onDispatchAction('PONG_GOAL', { scorerUid: topUid, actingUid: topUid });
             break;
           }
         }
@@ -600,6 +600,12 @@ export const PongView: React.FC<PongViewProps> = ({
             {isBottomPlayer ? p2Score : p1Score}
           </span>
         </div>
+      </div>
+
+      {/* Target Points Goal Banner */}
+      <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-[11px] font-mono text-cyan-300 font-bold">
+        <span>🏆 TARGET:</span>
+        <span className="text-white font-black">FIRST TO {room.maxRounds || gameState.targetScore || 5}</span>
       </div>
 
       {/* Massive Responsive Air Hockey Arena Stadium */}

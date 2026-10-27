@@ -441,4 +441,18 @@ export class WebRTCTransport implements IRoomTransport {
       await this.broadcast.resetRoomToLobby(roomId);
     }
   }
+
+  public async updateMatchConfig(roomId: string, maxRounds: number, difficulty?: string): Promise<void> {
+    if (this.isHost) {
+      await this.broadcast.updateMatchConfig(roomId, maxRounds, difficulty);
+      const current = this.broadcast.getStoredRoomDirect(roomId);
+      if (current) {
+        this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
+      }
+    } else if (this.hostConnection && this.hostConnection.open) {
+      this.hostConnection.send({ type: 'MATCH_CONFIG', payload: { maxRounds, difficulty } as any });
+    } else {
+      await this.broadcast.updateMatchConfig(roomId, maxRounds, difficulty);
+    }
+  }
 }

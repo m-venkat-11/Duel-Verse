@@ -126,7 +126,7 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
             setRoundMessage('💨 YOU DODGED! ROLES SWAP!');
             setOpHandAnim('idle');
             setHandAnim('idle');
-            onDispatchAction('SLAP_STRIKE', { attackerUid: p2Uid, isDodging: true });
+            onDispatchAction('SLAP_STRIKE', { attackerUid: p2Uid, actingUid: p2Uid, isDodging: true });
           } else {
             soundService.playGoal();
             setScreenFlash(true);
@@ -140,7 +140,7 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
               setRoundMessage(null);
             }, 800);
 
-            onDispatchAction('SLAP_STRIKE', { attackerUid: p2Uid, isDodging: false });
+            onDispatchAction('SLAP_STRIKE', { attackerUid: p2Uid, actingUid: p2Uid, isDodging: false });
           }
         }, 180);
       }, 1400 + Math.random() * 1200);
@@ -164,7 +164,7 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
 
   const p1Score = gameState.scores?.[p1Uid] || 0;
   const p2Score = gameState.scores?.[p2Uid] || 0;
-  const targetScore = gameState.targetScore || 5;
+  const targetScore = room.maxRounds || gameState.targetScore || 5;
 
   return (
     <div className={`w-full max-w-lg mx-auto flex flex-col items-center select-none gap-3 px-2 transition-colors duration-100 ${

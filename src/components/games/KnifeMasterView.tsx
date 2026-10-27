@@ -133,6 +133,7 @@ export const KnifeMasterView: React.FC<KnifeMasterViewProps> = ({
           if (isHost) {
             onDispatchAction('KNIFE_THROW', {
               playerUid: fk.ownerUid,
+              actingUid: fk.ownerUid,
               wheelAngle: wheelAngleRef.current
             });
           }
@@ -315,7 +316,7 @@ export const KnifeMasterView: React.FC<KnifeMasterViewProps> = ({
 
         <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-600/20 text-violet-300 border border-violet-500/40 text-[11px] font-mono">
           <Target className="w-3.5 h-3.5 text-cyan-400" />
-          <span>FIRST TO {gameState.targetScore || 3} WINS</span>
+          <span>FIRST TO {room.maxRounds || gameState.targetScore || 3} WINS</span>
         </div>
 
         <div className="flex items-center gap-2">
