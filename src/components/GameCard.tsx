@@ -87,7 +87,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                 soundService.playClick();
                 onPlayVsAi(game.id);
               }}
-              className="flex-1 py-1.5 px-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 hover:text-white font-mono font-bold text-[11px] flex items-center justify-center gap-1 transition active:scale-95"
+              className="flex-1 py-2.5 px-3 min-h-[40px] rounded-xl bg-cyan-500/15 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 hover:text-white font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm"
             >
               <span>🤖 VS BOT</span>
             </button>
@@ -98,10 +98,10 @@ export const GameCard: React.FC<GameCardProps> = ({
               soundService.playClick();
               onSelect(game.id);
             }}
-            className="flex-1 py-1.5 px-2 rounded-xl bg-violet-600/30 hover:bg-violet-600/50 border border-violet-400/50 text-white font-mono font-bold text-[11px] flex items-center justify-center gap-1 transition active:scale-95 shadow-md shadow-violet-500/20"
+            className="flex-1 py-2.5 px-3 min-h-[40px] rounded-xl bg-violet-600/30 hover:bg-violet-600/50 border border-violet-400/50 text-white font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md shadow-violet-500/20"
           >
             <span>⚔️ 2P ROOM</span>
-            <Play className="w-2.5 h-2.5 fill-current" />
+            <Play className="w-3 h-3 fill-current" />
           </button>
         </div>
       </div>

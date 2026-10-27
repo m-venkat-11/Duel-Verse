@@ -15,6 +15,7 @@ import { QRCodeModal } from './components/QRCodeModal';
 import { ProfileModal } from './components/ProfileModal';
 import { GameSwitcherModal } from './components/GameSwitcherModal';
 import { ToastContainer, type ToastMessage } from './components/Toast';
+import { IntroScreen } from './components/IntroScreen';
 
 // Game View Components
 import { TicTacToeView } from './components/games/TicTacToeView';
@@ -41,6 +42,12 @@ export function App() {
   const [room, setRoom] = useState<AuthoritativeRoomState | null>(null);
   const [isMuted, setIsMuted] = useState<boolean>(soundService.getMuted());
   const [showCountdown, setShowCountdown] = useState<boolean>(false);
+  const [showIntro, setShowIntro] = useState<boolean>(() => {
+    // If user opened with direct room invite link, bypass intro directly into room
+    const hasRoomParam = typeof window !== 'undefined' && Boolean(new URLSearchParams(window.location.search).get('room'));
+    if (hasRoomParam) return false;
+    return true;
+  });
   const [botDifficulty, setBotDifficulty] = useState<BotDifficulty>('master');
   const rpsHistoryRef = useRef<Array<{ humanChoice: string; botChoice: string; winner: string | null }>>([]);
   const cardMemoryRef = useRef<Map<number, string>>(new Map());
@@ -592,6 +599,11 @@ export function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--bg-primary)] text-slate-100 selection:bg-violet-500 selection:text-white">
+      {/* Cinematic Intro Title Animation Screen */}
+      {showIntro && (
+        <IntroScreen onEnter={() => setShowIntro(false)} />
+      )}
+
       {/* Header Bar */}
       <Header
         room={room}
@@ -602,12 +614,13 @@ export function App() {
         onOpenTestWindow={handleOpenTestWindow}
         onLeaveRoom={handleLeaveRoom}
         onOpenProfile={() => setShowProfileModal(true)}
+        onShowIntro={() => setShowIntro(true)}
         playerAvatar={profile.avatarId}
         playerNickname={profile.nickname}
       />
 
       {/* Main Content Area */}
-      <main className={`flex-1 flex flex-col items-center w-full ${!room ? 'justify-start' : 'justify-start pt-3 sm:pt-4'} p-2 sm:p-4`}>
+      <main className="flex-1 flex flex-col items-center w-full p-2 sm:p-4">
         {!room ? (
           // Landing & Home View
           <HomeView
@@ -627,6 +640,7 @@ export function App() {
             onOpenQR={() => setShowQRModal(true)}
             onOpenTestWindow={handleOpenTestWindow}
             onAddBotRival={handleAddBotRival}
+            onLeaveRoom={handleLeaveRoom}
             onNotifyToast={addToast}
           />
         ) : (

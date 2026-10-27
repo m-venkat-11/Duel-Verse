@@ -225,9 +225,86 @@ export const ArenaStage: React.FC<ArenaStageProps> = ({
         </div>
 
         {/* CENTER COLUMN: The Active Game Stage (Expanded & Tactile) */}
-        <div className="lg:col-span-6 w-full flex flex-col items-center justify-center min-h-[520px]">
+        <div className="lg:col-span-6 w-full flex flex-col items-center justify-center min-h-[480px]">
           <div className="w-full flex flex-col items-center">
             {children}
+          </div>
+
+          {/* MOBILE COMBAT COMMAND DECK (<lg only) */}
+          <div className="flex lg:hidden w-full max-w-xl flex-col gap-3 mt-5 px-1">
+            {/* Emote Reaction Bar */}
+            <div className="p-3 rounded-2xl bg-slate-950/80 border border-white/10 flex items-center justify-between gap-1 shadow-lg backdrop-blur-md">
+              <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider pl-1">
+                React:
+              </span>
+              <div className="flex items-center gap-1.5">
+                {['🔥', '😎', '⚡', '👏', '💥'].map((emoji) => (
+                  <button
+                    key={emoji}
+                    onClick={() => handleSendEmote(emoji)}
+                    className="w-10 h-10 rounded-xl bg-slate-900 border border-white/10 flex items-center justify-center text-xl hover:scale-110 active:scale-95 transition shadow-sm"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {activeTaunt && (
+              <div className="text-center py-1.5 rounded-xl bg-amber-500/20 text-amber-300 text-xs font-bold animate-bounce border border-amber-500/30">
+                Reaction Sent: {activeTaunt}
+              </div>
+            )}
+
+            {/* CyberBot Speech & Difficulty Bar (if playing vs Bot) */}
+            {isBotPlaying && (
+              <div className="p-3 rounded-2xl bg-slate-950/80 border border-cyan-500/30 shadow-lg backdrop-blur-md">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-mono font-bold text-cyan-400 flex items-center gap-1">
+                    <Bot className="w-3.5 h-3.5" />
+                    <span>CYBERBOT v2.4</span>
+                  </span>
+                  <div className="flex gap-1">
+                    {(['casual', 'pro', 'master'] as BotDifficulty[]).map((diff) => (
+                      <button
+                        key={diff}
+                        onClick={() => onSetBotDifficulty(diff)}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold uppercase transition ${
+                          botDifficulty === diff
+                            ? 'bg-cyan-500 text-slate-950 font-black shadow-sm'
+                            : 'bg-slate-900 text-slate-400 border border-white/5'
+                        }`}
+                      >
+                        {diff}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-xs text-slate-300 italic">"{botSpeech.text}"</p>
+              </div>
+            )}
+
+            {/* Mobile Surrender & Sound Actions */}
+            <div className="flex items-center justify-between gap-2">
+              <button
+                onClick={onToggleMute}
+                className={`flex-1 py-2.5 px-3 rounded-xl border flex items-center justify-center gap-2 text-xs font-bold font-mono transition ${
+                  isMuted
+                    ? 'bg-rose-500/20 border-rose-500/50 text-rose-300'
+                    : 'bg-slate-900 border-white/10 text-slate-300'
+                }`}
+              >
+                {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                <span>{isMuted ? 'Muted' : 'Sound ON'}</span>
+              </button>
+
+              <button
+                onClick={onLeaveRoom}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-rose-500/15 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 text-xs font-bold font-mono flex items-center justify-center gap-2 transition active:scale-95"
+              >
+                <Flag className="w-4 h-4" />
+                <span>Surrender</span>
+              </button>
+            </div>
           </div>
         </div>
 

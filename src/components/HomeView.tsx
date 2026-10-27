@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Plus, ArrowRight, Users, Flame, Gamepad2, HelpCircle, Swords, Zap } from 'lucide-react';
+import { Plus, ArrowRight, Users, Flame, Gamepad2, HelpCircle, Swords, Zap, Sparkles } from 'lucide-react';
 import { GAMES_CATALOG, type GameCategory } from '../config/games';
 import { GameCard } from './GameCard';
 import { soundService } from '../services/sound';
-import type { LocalPlayerProfile } from '../services/player';
+import { getPlayerRank, type LocalPlayerProfile } from '../services/player';
 
 interface HomeViewProps {
   profile: LocalPlayerProfile;
@@ -73,6 +73,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
   ];
 
   const totalMatches = profile.stats.wins + profile.stats.losses + profile.stats.draws;
+  const rank = getPlayerRank(profile.stats.wins);
+  const winRate = totalMatches > 0 ? Math.round((profile.stats.wins / totalMatches) * 100) : 0;
 
   return (
     <div className="w-full max-w-6xl mx-auto px-3 sm:px-6 py-2 flex flex-col items-center">
@@ -179,38 +181,66 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
       </div>
 
-      {/* Profile & Recent Record Bar (If matches played) */}
-      {totalMatches > 0 && (
-        <div
-          onClick={onOpenProfile}
-          className="w-full glass-card p-3 sm:p-4 rounded-2xl border border-violet-500/30 mb-6 flex items-center justify-between gap-4 cursor-pointer hover:border-violet-400 transition shadow-lg"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-violet-600/30 border border-violet-400/50 flex items-center justify-center text-2xl shadow-md shrink-0">
-              {profile.avatarId}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-black text-white font-['Outfit'] text-base">
-                  {profile.nickname}
-                </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
-                  {totalMatches} Matches Fought
-                </span>
-              </div>
-              <div className="flex items-center gap-3 text-xs mt-0.5">
-                <span className="text-amber-400 font-black font-mono">{profile.stats.wins} Wins</span>
-                <span className="text-rose-400 font-black font-mono">{profile.stats.losses} Losses</span>
-                <span className="text-cyan-400 font-black font-mono">{profile.stats.draws} Draws</span>
-              </div>
-            </div>
+      {/* Duelist Gamer Passport Banner */}
+      <div
+        onClick={onOpenProfile}
+        className="w-full glass-card p-4 sm:p-5 rounded-3xl border-2 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:border-violet-400 transition-all duration-200 shadow-xl relative overflow-hidden group"
+        style={{
+          borderColor: profile.accentColor || '#8B5CF6',
+          boxShadow: `0 0 30px ${(profile.accentColor || '#8B5CF6')}25`
+        }}
+      >
+        <div className="flex items-center gap-4">
+          <div
+            className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center text-3xl sm:text-4xl shadow-xl shrink-0 border-2 transition-transform duration-200 group-hover:scale-105"
+            style={{
+              backgroundColor: `${profile.accentColor || '#8B5CF6'}20`,
+              borderColor: profile.accentColor || '#8B5CF6'
+            }}
+          >
+            {profile.avatarId}
           </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-black text-white font-['Outfit'] text-lg sm:text-xl truncate">
+                {profile.nickname}
+              </span>
+              <span
+                className="text-[10px] px-2 py-0.5 rounded-full font-mono font-black flex items-center gap-1 border border-white/20 shrink-0"
+                style={{ backgroundColor: rank.color, color: '#000' }}
+              >
+                <span>{rank.badge}</span>
+                <span className="uppercase">{rank.tier}</span>
+              </span>
+            </div>
 
-          <button className="btn-secondary py-1.5 px-3 text-xs font-bold">
-            Edit Gamer
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs mt-1 font-mono font-bold">
+              <span className="text-amber-400">{profile.stats.wins} Wins</span>
+              <span className="text-rose-400">{profile.stats.losses} Losses</span>
+              <span className="text-cyan-400">{profile.stats.draws} Draws</span>
+              <span className="text-emerald-400 font-extrabold">{winRate}% WR</span>
+              {Boolean(profile.stats.currentStreak) && (
+                <span className="text-orange-400 font-extrabold">
+                  🔥 {profile.stats.currentStreak} Streak
+                </span>
+              )}
+            </div>
+
+            {profile.motto && (
+              <p className="text-[11px] text-slate-400 italic mt-1 line-clamp-1">
+                "{profile.motto}"
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+          <button className="btn-secondary py-2 px-4 text-xs font-bold font-mono flex items-center gap-1.5 shadow-sm">
+            <span>Customize</span>
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
           </button>
         </div>
-      )}
+      </div>
 
       {/* Arcade Library Header & Filter Pills */}
       <div className="w-full mb-6">
