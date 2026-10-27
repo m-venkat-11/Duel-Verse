@@ -1,122 +1,122 @@
-import type { ObstacleRushState, ObstaclePlayer, MovingHazard } from '../types/game';
+export interface RunnerHazard {
+  id: number;
+  distance: number; // in meters (0 to 1000)
+  lane: number; // 0 (left), 1 (center), 2 (right)
+  type: 'barrier' | 'emp' | 'boost';
+}
 
-export const COURSE_LENGTH = 2400; // total course length in pixels
+export interface RunnerPlayer {
+  uid: string;
+  lane: number; // 0, 1, 2
+  distance: number; // meters traveled (0 to 1000)
+  speed: number;
+  stumbledUntil: number;
+  finished: boolean;
+  finishTime: number | null;
+}
 
-export function createObstacleRushInitialState(playerUids: string[]): ObstacleRushState {
-  const players: Record<string, ObstaclePlayer> = {};
+export interface ObstacleRushState {
+  courseLength: number; // 1000m
+  players: Record<string, RunnerPlayer>;
+  hazards: RunnerHazard[];
+  startTime: number;
+  winnerUid: string | null;
+  targetWins: number;
+  scores: Record<string, number>;
+}
 
-  playerUids.forEach((uid, index) => {
+export function createObstacleRushInitialState(playerUids: string[], targetWins: number = 3): ObstacleRushState {
+  const players: Record<string, RunnerPlayer> = {};
+  const scores: Record<string, number> = {};
+
+  playerUids.forEach((uid) => {
     players[uid] = {
       uid,
-      x: 150 + index * 100, // separate initial lanes
-      y: 50,                // starting line
-      vx: 0,
-      vy: 0,
-      checkpoint: 0,
-      isGrounded: true,
-      isStunned: false,
-      stunUntil: 0,
+      lane: 1, // center
+      distance: 0,
+      speed: 18, // m/s
+      stumbledUntil: 0,
+      finished: false,
       finishTime: null
     };
+    scores[uid] = 0;
   });
 
-  const hazards: MovingHazard[] = [
-    { id: 'rot_1', type: 'rotator', trackY: 350, periodMs: 2400, width: 220, height: 24 },
-    { id: 'rot_2', type: 'rotator', trackY: 550, periodMs: 2000, width: 240, height: 24 },
-    { id: 'osc_1', type: 'oscillator', trackY: 850, periodMs: 1800, width: 140, height: 40 },
-    { id: 'rot_3', type: 'rotator', trackY: 1200, periodMs: 2200, width: 260, height: 24 },
-    { id: 'osc_2', type: 'oscillator', trackY: 1550, periodMs: 1600, width: 160, height: 40 },
-    { id: 'rot_4', type: 'rotator', trackY: 1850, periodMs: 1900, width: 260, height: 24 },
-  ];
+  // Generate deterministic course hazards from 50m to 950m
+  const hazards: RunnerHazard[] = [];
+  let hId = 1;
+  for (let dist = 60; dist < 940; dist += 45) {
+    const lane = (dist * 7 + 3) % 3;
+    const isBoost = (dist % 90) === 0;
+    hazards.push({
+      id: hId++,
+      distance: dist,
+      lane,
+      type: isBoost ? 'boost' : (dist % 120 === 0 ? 'emp' : 'barrier')
+    });
+  }
 
   return {
-    courseSeed: Math.floor(Math.random() * 1000000),
-    startTime: Date.now(),
+    courseLength: 1000,
     players,
     hazards,
-    finishOrder: []
+    startTime: Date.now() + 1000,
+    winnerUid: null,
+    targetWins,
+    scores
   };
 }
 
-export function updateObstaclePlayerPosition(
+export function switchRunnerLane(
   state: ObstacleRushState,
   playerUid: string,
-  x: number,
-  y: number,
-  vx: number,
-  vy: number
-): {
-  newState: ObstacleRushState;
-  finished: boolean;
-  winnerUid: string | null;
-} {
-  const player = state.players[playerUid];
-  if (!player || player.finishTime !== null) {
-    return { newState: state, finished: false, winnerUid: state.finishOrder[0] || null };
-  }
+  targetLane: number
+): ObstacleRushState {
+  const p = state.players[playerUid];
+  if (!p || p.finished) return state;
 
-  // Check checkpoint updates
-  let checkpoint = player.checkpoint;
-  if (y >= 700 && checkpoint < 1) checkpoint = 1;
-  if (y >= 1400 && checkpoint < 2) checkpoint = 2;
-
-  // Check finish line!
-  let finishTime: number | null = player.finishTime;
-  let nextFinishOrder = [...state.finishOrder];
-
-  if (y >= COURSE_LENGTH && finishTime === null) {
-    finishTime = Date.now();
-    if (!nextFinishOrder.includes(playerUid)) {
-      nextFinishOrder.push(playerUid);
-    }
-  }
-
-  const updatedPlayer: ObstaclePlayer = {
-    ...player,
-    x,
-    y,
-    vx,
-    vy,
-    checkpoint,
-    finishTime
-  };
-
-  const newState: ObstacleRushState = {
-    ...state,
-    players: {
-      ...state.players,
-      [playerUid]: updatedPlayer
-    },
-    finishOrder: nextFinishOrder
-  };
-
-  return {
-    newState,
-    finished: finishTime !== null,
-    winnerUid: nextFinishOrder[0] || null
-  };
-}
-
-export function triggerObstacleRespawn(state: ObstacleRushState, playerUid: string): ObstacleRushState {
-  const player = state.players[playerUid];
-  if (!player) return state;
-
-  let respawnY = 50;
-  if (player.checkpoint === 1) respawnY = 750;
-  else if (player.checkpoint === 2) respawnY = 1450;
-
+  const validLane = Math.max(0, Math.min(2, targetLane));
   return {
     ...state,
     players: {
       ...state.players,
       [playerUid]: {
-        ...player,
-        x: 200,
-        y: respawnY,
-        vx: 0,
-        vy: 0,
-        isStunned: false
+        ...p,
+        lane: validLane
       }
     }
+  };
+}
+
+export function registerRunnerFinish(
+  state: ObstacleRushState,
+  winnerUid: string
+): {
+  newState: ObstacleRushState;
+  matchOver: boolean;
+  matchWinnerUid: string | null;
+} {
+  const nextScores = {
+    ...state.scores,
+    [winnerUid]: (state.scores[winnerUid] || 0) + 1
+  };
+  const matchOver = nextScores[winnerUid] >= state.targetWins;
+
+  return {
+    newState: {
+      ...state,
+      winnerUid,
+      scores: nextScores,
+      players: {
+        ...state.players,
+        [winnerUid]: {
+          ...state.players[winnerUid],
+          finished: true,
+          finishTime: Date.now()
+        }
+      }
+    },
+    matchOver,
+    matchWinnerUid: matchOver ? winnerUid : null
   };
 }

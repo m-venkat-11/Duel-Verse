@@ -1,7 +1,8 @@
-import React, { useState, useRef } from 'react';
-import type { TapFrenzyState } from '../../types/game';
+import React, { useState, useEffect, useRef } from 'react';
 import type { AuthoritativeRoomState } from '../../types/room';
+import type { TapFrenzyState } from '../../engine/tapFrenzyEngine';
 import { soundService } from '../../services/sound';
+import { Zap, Flame, Trophy, Sparkles } from 'lucide-react';
 
 interface TapFrenzyViewProps {
   room: AuthoritativeRoomState<TapFrenzyState>;
@@ -9,11 +10,10 @@ interface TapFrenzyViewProps {
   onDispatchAction: (type: string, payload: any) => void;
 }
 
-interface FloatingScore {
+interface TapRipple {
   id: string;
   x: number;
   y: number;
-  text: string;
   color: string;
 }
 
@@ -23,153 +23,248 @@ export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({
   onDispatchAction
 }) => {
   const gameState = room.gameState;
-  const myScore = gameState.scores?.[playerUid] || 0;
-  const isFrozen = gameState.frozenUntil?.[playerUid] && Date.now() < gameState.frozenUntil[playerUid];
-  const [floatingScores, setFloatingScores] = useState<FloatingScore[]>([]);
-  const arenaRef = useRef<HTMLDivElement>(null);
+  const players = Object.keys(room.players);
+  const p1Uid = players[0] || 'p1';
+  const p2Uid = players[1] || 'p2';
+  const isP1 = playerUid === p1Uid;
+  const isHost = room.hostUid === playerUid;
+  const isBotPlaying = Boolean(room.players['bot_rival'] || p2Uid === 'bot_rival');
 
-  const opponent = Object.values(room.players).find(p => p.uid !== playerUid);
-  const opScore = gameState.scores?.[opponent?.uid || ''] || 0;
+  const p1Nickname = room.players[p1Uid]?.nickname || 'Player 1';
+  const p2Nickname = room.players[p2Uid]?.nickname || 'CyberBot AI';
 
-  const handleTapTarget = (targetId: string, type: string, x: number, y: number) => {
-    if (isFrozen) return;
+  const [ripples, setRipples] = useState<TapRipple[]>([]);
+  const [tapScale, setTapScale] = useState<boolean>(false);
+  const [myCps, setMyCps] = useState<number>(0);
+  const [isFrenzy, setIsFrenzy] = useState<boolean>(false);
 
-    const floatId = Math.random().toString(36).substr(2, 9);
-    let text = '+100';
-    let color = '#f59e0b';
-    if (type === 'spark') { text = '+250'; color = '#22d3ee'; soundService.playScore?.(); }
-    else if (type === 'bomb') { text = '-150'; color = '#f43f5e'; soundService.playFalseStart?.(); }
-    else { soundService.playScore?.(); }
+  // CPS tracker
+  const tapTimestampsRef = useRef<number[]>([]);
 
-    setFloatingScores(prev => [...prev, { id: floatId, x, y, text, color }]);
-    setTimeout(() => setFloatingScores(prev => prev.filter(f => f.id !== floatId)), 800);
+  // Tug of war position: -100 (P1 win) to +100 (P2 win)
+  const pos = gameState.tugPosition || 0;
+  // Normalized 0 to 100% for progress bar (50% is center)
+  // When pos = -100, p1Percent = 100%, p2Percent = 0%
+  const p1Percent = Math.max(0, Math.min(100, 50 - (pos / 2)));
+  const p2Percent = 100 - p1Percent;
 
-    onDispatchAction('FRENZY_TAP', { targetId });
+  const handleTap = (e?: React.PointerEvent) => {
+    if (gameState.roundWinner !== null) return;
+
+    const now = Date.now();
+    tapTimestampsRef.current.push(now);
+    // Keep timestamps from last 1 second
+    tapTimestampsRef.current = tapTimestampsRef.current.filter((t) => now - t <= 1000);
+    const cps = tapTimestampsRef.current.length;
+    setMyCps(cps);
+
+    const frenzy = cps >= 6;
+    setIsFrenzy(frenzy);
+
+    // Visual ripple effect
+    const rippleId = Math.random().toString(36).substring(2, 9);
+    const rx = e ? e.nativeEvent.offsetX : 50;
+    const ry = e ? e.nativeEvent.offsetY : 50;
+    setRipples((prev) => [...prev.slice(-6), {
+      id: rippleId,
+      x: rx,
+      y: ry,
+      color: isP1 ? '#f59e0b' : '#06b6d4'
+    }]);
+    setTimeout(() => {
+      setRipples((prev) => prev.filter((r) => r.id !== rippleId));
+    }, 450);
+
+    setTapScale(true);
+    setTimeout(() => setTapScale(false), 80);
+
+    soundService.playScore();
+
+    // Multiplier bonus if in Frenzy state
+    const multiplier = frenzy ? 1.5 : 1.0;
+    onDispatchAction('TAP_WAR_MASH', { playerUid, p1Uid, multiplier });
   };
 
-  const getTargetStyle = (type: string) => {
-    if (type === 'coin') return {
-      bg: 'radial-gradient(circle at 35% 35%, #fbbf24, #b45309)',
-      border: '2px solid #fcd34d',
-      shadow: '0 0 20px rgba(245,158,11,0.6)',
-      icon: '🪙',
+  // Keyboard controls
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isP1 && (e.key === ' ' || e.key.toLowerCase() === 'w' || e.key.toLowerCase() === 'a')) {
+        e.preventDefault();
+        handleTap();
+      } else if (!isP1 && (e.key === 'Enter' || e.key === 'ArrowUp' || e.key.toLowerCase() === 'l')) {
+        e.preventDefault();
+        handleTap();
+      }
     };
-    if (type === 'spark') return {
-      bg: 'radial-gradient(circle at 35% 35%, #22d3ee, #0e7490)',
-      border: '2px solid #67e8f9',
-      shadow: '0 0 24px rgba(6,182,212,0.7)',
-      icon: '💎',
-    };
-    return {
-      bg: 'radial-gradient(circle at 35% 35%, #f43f5e, #9f1239)',
-      border: '2px solid #fda4af',
-      shadow: '0 0 20px rgba(244,63,94,0.6)',
-      icon: '💣',
-    };
-  };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isP1, gameState.roundWinner]);
+
+  // CyberBot AI Auto-Mashing
+  useEffect(() => {
+    if (!isHost || !isBotPlaying || gameState.roundWinner !== null) return;
+
+    // Mash speed intervals (every 90ms to 140ms = 7-11 CPS)
+    const interval = setInterval(() => {
+      if (Math.random() < 0.88) {
+        onDispatchAction('TAP_WAR_MASH', { playerUid: p2Uid, p1Uid, multiplier: 1.0 });
+      }
+    }, 110);
+
+    return () => clearInterval(interval);
+  }, [isHost, isBotPlaying, p1Uid, p2Uid, gameState.roundWinner, onDispatchAction]);
+
+  const p1Wins = gameState.scores?.[p1Uid] || 0;
+  const p2Wins = gameState.scores?.[p2Uid] || 0;
+  const targetWins = gameState.targetWins || 3;
 
   return (
-    <div className="w-full max-w-xl mx-auto flex flex-col items-center select-none gap-2">
-      {/* Score Race Bar */}
-      <div className="w-full flex items-center gap-2 px-3 py-2 rounded-2xl bg-slate-900/90 border border-slate-700/60">
-        <div className="flex-1 text-center">
-          <div className="text-xl font-black font-mono text-amber-400">{myScore}</div>
-          <div className="text-[10px] text-amber-300 font-bold">YOU</div>
+    <div className="w-full max-w-xl mx-auto flex flex-col items-center select-none gap-3 px-2">
+      {/* Target Wins & Round Status Bar */}
+      <div className="w-full flex items-center justify-between px-4 py-2 rounded-2xl bg-slate-900/90 border border-slate-700/60 text-xs font-black font-mono shadow-md backdrop-blur-md">
+        <div className="flex items-center gap-2">
+          <span className="text-amber-400">{p1Nickname}</span>
+          <div className="flex gap-1">
+            {Array.from({ length: targetWins }).map((_, i) => (
+              <div
+                key={i}
+                className={`w-4 h-4 rounded-full border transition-all ${
+                  i < p1Wins
+                    ? 'bg-amber-400 border-amber-300 shadow-[0_0_8px_#f59e0b]'
+                    : 'bg-slate-800 border-slate-700'
+                }`}
+              />
+            ))}
+          </div>
         </div>
-        <div className="flex-1 h-3 bg-slate-800 rounded-full overflow-hidden relative">
+
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-600/20 text-violet-300 border border-violet-500/40 font-mono text-[11px]">
+          <Zap className="w-3.5 h-3.5 text-violet-400 animate-pulse" />
+          <span>ROUND {gameState.roundNumber || 1} • FIRST TO {targetWins}</span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1">
+            {Array.from({ length: targetWins }).map((_, i) => (
+              <div
+                key={i}
+                className={`w-4 h-4 rounded-full border transition-all ${
+                  i < p2Wins
+                    ? 'bg-cyan-400 border-cyan-300 shadow-[0_0_8px_#06b6d4]'
+                    : 'bg-slate-800 border-slate-700'
+                }`}
+              />
+            ))}
+          </div>
+          <span className="text-cyan-400">{p2Nickname}</span>
+        </div>
+      </div>
+
+      {/* Central Plasma Tug-of-War Gauge */}
+      <div className="w-full p-4 rounded-3xl bg-slate-950/90 border-2 border-violet-500/40 shadow-2xl relative overflow-hidden backdrop-blur-md">
+        {/* Glow ambient background */}
+        <div className="absolute inset-0 bg-gradient-to-r from-amber-500/10 via-transparent to-cyan-500/10 pointer-events-none" />
+
+        <div className="flex items-center justify-between text-xs font-mono font-bold mb-2">
+          <span className="text-amber-400 flex items-center gap-1">
+            <Flame className="w-4 h-4 text-amber-400 animate-pulse" />
+            <span>P1 DOMAIN ({Math.round(p1Percent)}%)</span>
+          </span>
+          <span className="text-slate-500 text-[11px] uppercase tracking-wider">
+            ENERGY TUG-OF-WAR
+          </span>
+          <span className="text-cyan-400 flex items-center gap-1">
+            <span>({Math.round(p2Percent)}%) P2 DOMAIN</span>
+            <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
+          </span>
+        </div>
+
+        {/* Dynamic Dual Energy Beam Tube */}
+        <div className="w-full h-8 bg-slate-900 rounded-2xl overflow-hidden p-1 border-2 border-slate-700 relative shadow-inner flex items-center">
+          {/* P1 Energy Beam */}
           <div
-            className="h-full bg-gradient-to-r from-amber-500 to-amber-400 transition-all duration-200 rounded-full"
-            style={{ width: `${Math.min(100, (myScore / Math.max(myScore + opScore, 1)) * 100)}%` }}
+            className="h-full bg-gradient-to-r from-amber-600 via-amber-400 to-yellow-300 rounded-l-xl transition-all duration-100 relative shadow-[0_0_20px_#f59e0b]"
+            style={{ width: `${p1Percent}%` }}
+          />
+
+          {/* Central High-Voltage Core Orb */}
+          <div
+            className="w-8 h-8 rounded-full bg-white border-2 border-slate-900 shadow-[0_0_25px_#ffffff] -ml-4 z-20 shrink-0 flex items-center justify-center transition-all duration-100"
+            style={{ transform: `scale(${isFrenzy ? 1.25 : 1.0})` }}
+          >
+            <Zap className="w-4 h-4 text-slate-950 fill-current animate-bounce" />
+          </div>
+
+          {/* P2 Energy Beam */}
+          <div
+            className="h-full bg-gradient-to-r from-cyan-300 via-cyan-400 to-blue-600 rounded-r-xl transition-all duration-100 relative shadow-[0_0_20px_#06b6d4]"
+            style={{ width: `${p2Percent}%` }}
           />
         </div>
-        <div className="flex-1 text-center">
-          <div className="text-xl font-black font-mono text-cyan-400">{opScore}</div>
-          <div className="text-[10px] text-cyan-300 font-bold">{opponent?.nickname?.split(' ')[0] || 'RIVAL'}</div>
+
+        {/* Win threshold indicators */}
+        <div className="flex items-center justify-between text-[10px] font-mono font-bold text-slate-500 mt-2 px-1">
+          <span className="text-amber-400/80">◀ P1 WIN GOAL</span>
+          <span className="text-slate-600">CENTER</span>
+          <span className="text-cyan-400/80">P2 WIN GOAL ▶</span>
         </div>
       </div>
 
-      {/* Tap Arena */}
-      <div
-        ref={arenaRef}
-        className="w-full relative overflow-hidden touch-none select-none rounded-3xl border-2 shadow-2xl"
-        style={{
-          aspectRatio: '1 / 1',
-          background: 'radial-gradient(ellipse at center, #0a1628 0%, #030810 100%)',
-          border: '2px solid rgba(245,158,11,0.3)',
-          boxShadow: '0 0 40px rgba(245,158,11,0.08), 0 20px 60px rgba(0,0,0,0.6)',
-        }}
-      >
-        {/* Subtle grid */}
-        <div className="absolute inset-0 opacity-5 pointer-events-none"
-          style={{ backgroundImage: 'linear-gradient(rgba(245,158,11,1) 1px, transparent 1px), linear-gradient(90deg, rgba(245,158,11,1) 1px, transparent 1px)', backgroundSize: '32px 32px' }}
-        />
+      {/* Round Over Banner */}
+      {gameState.roundWinner && (
+        <div className="w-full py-3 px-4 rounded-2xl bg-amber-500/20 border-2 border-amber-400 text-amber-300 text-center font-['Outfit'] font-black text-lg animate-bounce shadow-xl">
+          🏆 {gameState.roundWinner === p1Uid ? p1Nickname : p2Nickname} WON THE ROUND!
+        </div>
+      )}
 
-        {/* Frozen overlay */}
-        {isFrozen && (
-          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center rounded-3xl animate-pulse"
-            style={{ background: 'rgba(6,182,212,0.15)', backdropFilter: 'blur(4px)' }}
-          >
-            <span className="text-6xl mb-1">❄️</span>
-            <span className="text-2xl font-black font-mono text-cyan-300 tracking-wider">STUNNED!</span>
-            <span className="text-xs text-cyan-200 mt-1">1 second freeze</span>
+      {/* Massive Tactile Arcade Smash Button */}
+      <div className="w-full pt-1 flex flex-col items-center">
+        <button
+          onPointerDown={handleTap}
+          disabled={gameState.roundWinner !== null}
+          className={`w-full h-44 sm:h-52 rounded-3xl relative overflow-hidden transition-all duration-75 shadow-2xl active:scale-95 border-4 select-none ${
+            isP1
+              ? 'bg-gradient-to-b from-amber-500 via-orange-500 to-amber-700 border-amber-300 shadow-amber-500/40'
+              : 'bg-gradient-to-b from-cyan-400 via-sky-500 to-blue-700 border-cyan-200 shadow-cyan-500/40'
+          } ${tapScale ? 'scale-[0.98] brightness-125' : 'scale-100'}`}
+        >
+          {/* Specular gloss top light */}
+          <div className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/35 to-transparent pointer-events-none" />
+
+          {/* Ripples on tap */}
+          {ripples.map((rip) => (
+            <span
+              key={rip.id}
+              className="absolute w-28 h-28 rounded-full bg-white/40 pointer-events-none animate-ping -translate-x-1/2 -translate-y-1/2"
+              style={{ left: rip.x, top: rip.y }}
+            />
+          ))}
+
+          {/* Button Content */}
+          <div className="relative z-10 flex flex-col items-center justify-center h-full gap-1">
+            <span className="text-4xl sm:text-5xl drop-shadow-md">
+              {isP1 ? '🔥' : '⚡'}
+            </span>
+            <span className="text-2xl sm:text-3xl font-black font-['Outfit'] tracking-tight text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">
+              MASH TO PUSH!
+            </span>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs font-black font-mono px-3 py-1 rounded-full bg-black/40 text-white backdrop-blur-md border border-white/20">
+                SPEED: {myCps} CPS
+              </span>
+              {isFrenzy && (
+                <span className="text-xs font-black font-mono px-2.5 py-1 rounded-full bg-amber-400 text-slate-950 animate-pulse font-extrabold shadow-lg">
+                  ⚡ 1.5x FRENZY!
+                </span>
+              )}
+            </div>
           </div>
-        )}
+        </button>
 
-        {/* Dynamic Targets */}
-        {gameState.targets?.map((target) => {
-          const style = getTargetStyle(target.type);
-          return (
-            <button
-              key={target.id}
-              onClick={() => handleTapTarget(target.id, target.type, target.x, target.y)}
-              style={{
-                position: 'absolute',
-                left: `${target.x}%`,
-                top: `${target.y}%`,
-                transform: 'translate(-50%, -50%)',
-                width: '60px',
-                height: '60px',
-                borderRadius: '18px',
-                background: style.bg,
-                border: style.border,
-                boxShadow: style.shadow,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '30px',
-                cursor: 'pointer',
-                transition: 'transform 0.1s',
-                animation: 'popIn 0.2s ease-out forwards',
-              }}
-              className="active:scale-75 touch-manipulation"
-            >
-              {style.icon}
-            </button>
-          );
-        })}
-
-        {/* Floating score animations */}
-        {floatingScores.map(f => (
-          <div
-            key={f.id}
-            className="absolute pointer-events-none font-black text-2xl font-mono select-none"
-            style={{
-              left: `${f.x}%`,
-              top: `${f.y}%`,
-              transform: 'translate(-50%, -200%)',
-              color: f.color,
-              textShadow: `0 0 10px ${f.color}`,
-              animation: 'floatUp 0.8s ease-out forwards',
-            }}
-          >
-            {f.text}
-          </div>
-        ))}
+        <p className="text-xs text-slate-400 font-mono mt-2 text-center">
+          📱 Mobile: Tap button as fast as you can • ⌨️ Desktop: Space or Enter key
+        </p>
       </div>
-
-      <p className="text-[11px] text-slate-500 font-medium">
-        🪙 Coins +100 · 💎 Gems +250 · 💣 Bombs -150 (avoid!)
-      </p>
     </div>
   );
 };

@@ -65,7 +65,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   };
 
   const categories: { id: GameCategory; label: string; icon: string }[] = [
-    { id: 'all', label: 'All Titles (10)', icon: '🎮' },
+    { id: 'all', label: `All Titles (${GAMES_CATALOG.length})`, icon: '🎮' },
     { id: 'physics', label: 'Physics & Action', icon: '🏃' },
     { id: 'foundational', label: 'Classics', icon: '⚔️' },
     { id: 'reflex', label: 'Reflex Speed', icon: '⚡' },
@@ -97,7 +97,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           {/* Live Badge */}
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-xs font-black font-mono tracking-wider mb-3 shadow-sm">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-            <span>INSTANT MULTIPLAYER ARCADE • 10 GAMES LIVE</span>
+            <span>INSTANT MULTIPLAYER ARCADE • {GAMES_CATALOG.length} GAMES LIVE</span>
           </div>
 
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black font-['Outfit'] tracking-tight text-white leading-none mb-3 drop-shadow-lg">

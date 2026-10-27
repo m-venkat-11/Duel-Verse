@@ -56,6 +56,21 @@ const COVER_MAP: Record<string, { image: string; fallbackGradient: string; title
     image: '/assets/tank_duel_cover.jpg',
     fallbackGradient: 'from-emerald-600 via-teal-500 to-cyan-600',
     title: 'Tank Duel'
+  },
+  slapduel: {
+    image: '/assets/slap_duel_cover.jpg',
+    fallbackGradient: 'from-rose-600 via-red-500 to-amber-600',
+    title: 'Slap Duel'
+  },
+  knifemaster: {
+    image: '/assets/knife_master_cover.jpg',
+    fallbackGradient: 'from-cyan-600 via-teal-500 to-emerald-600',
+    title: 'Knife Master'
+  },
+  sumospin: {
+    image: '/assets/sumo_spinners_cover.jpg',
+    fallbackGradient: 'from-amber-600 via-orange-500 to-red-600',
+    title: 'Sumo Spinners'
   }
 };
 

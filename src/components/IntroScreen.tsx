@@ -84,7 +84,7 @@ export const IntroScreen: React.FC<IntroScreenProps> = ({ onEnter }) => {
           <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border-2 border-violet-400/80 flex items-center justify-center shadow-2xl">
             <Swords className="w-12 h-12 sm:w-14 sm:h-14 text-cyan-300 filter drop-shadow-[0_0_15px_rgba(6,182,212,0.8)] animate-pulse" />
             <div className="absolute -bottom-2 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-rose-500 text-slate-950 text-[10px] font-black font-mono tracking-widest shadow-md">
-              10 GAMES
+              13 GAMES
             </div>
           </div>
         </div>

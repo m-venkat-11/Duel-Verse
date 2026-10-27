@@ -42,6 +42,26 @@ export const PongView: React.FC<PongViewProps> = ({
   const scoresRef = useRef({ p1Score, p2Score });
   scoresRef.current = { p1Score, p2Score };
 
+  const pointerXPercentRef = useRef<number | null>(null);
+  const keysDown = useRef<{ [key: string]: boolean }>({});
+  const mobileSteer = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      keysDown.current[e.key.toLowerCase()] = true;
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      keysDown.current[e.key.toLowerCase()] = false;
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -51,6 +71,16 @@ export const PongView: React.FC<PongViewProps> = ({
     const juice = new JuiceEngine(350);
     const input = new InputManager();
     input.attach(canvas);
+
+    // Direct pointer tracking (no click-down required on desktop!)
+    const handleDirectPointer = (e: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const rawPercent = ((e.clientX - rect.left) / rect.width) * 100;
+      pointerXPercentRef.current = Math.max(14, Math.min(86, rawPercent));
+    };
+
+    canvas.addEventListener('pointermove', handleDirectPointer);
+    canvas.addEventListener('pointerdown', handleDirectPointer);
 
     // Pre-allocated circular puck trail
     const TRAIL_LENGTH = 14;
@@ -214,21 +244,33 @@ export const PongView: React.FC<PongViewProps> = ({
 
       if (juice.isHitStopped()) return;
 
-      // 2. Local Player Mallet Control (Instant Direct Pointer Tracking)
-      if (input.pointer.isDown || input.pointer.justPressed) {
-        const rawPercent = (input.pointer.x / W) * 100;
-        const targetPercent = Math.max(14, Math.min(86, rawPercent));
-        const myUid = isBottomPlayer ? bottomUid : topUid;
+      // 2. Local Player Mallet Control (Instant Pointer Hover + Keyboard + Touch Steering)
+      const myUid = isBottomPlayer ? bottomUid : topUid;
+      let targetPercent = sim.paddles[myUid];
 
-        // Snappy, agile mallet movement
-        sim.paddles[myUid] += (targetPercent - sim.paddles[myUid]) * 0.55;
+      if (pointerXPercentRef.current !== null) {
+        targetPercent = pointerXPercentRef.current;
+      }
 
-        // Throttle network dispatch to 30ms
-        const now = Date.now();
-        if (now - sim.lastPaddleDispatchTime > 30) {
-          sim.lastPaddleDispatchTime = now;
-          onDispatchAction('PONG_PADDLE', { xPos: sim.paddles[myUid] });
-        }
+      const isKeyLeft = keysDown.current['a'] || keysDown.current['arrowleft'] || mobileSteer.current.left;
+      const isKeyRight = keysDown.current['d'] || keysDown.current['arrowright'] || mobileSteer.current.right;
+
+      if (isKeyLeft) {
+        targetPercent = Math.max(14, sim.paddles[myUid] - 4.5);
+        pointerXPercentRef.current = targetPercent;
+      } else if (isKeyRight) {
+        targetPercent = Math.min(86, sim.paddles[myUid] + 4.5);
+        pointerXPercentRef.current = targetPercent;
+      }
+
+      // Snappy, agile mallet movement
+      sim.paddles[myUid] += (targetPercent - sim.paddles[myUid]) * 0.65;
+
+      // Throttle network dispatch to 30ms
+      const now = Date.now();
+      if (now - sim.lastPaddleDispatchTime > 30) {
+        sim.lastPaddleDispatchTime = now;
+        onDispatchAction('PONG_PADDLE', { xPos: sim.paddles[myUid] });
       }
 
       // 3. CyberBot Air Hockey AI (Smart Defensive & Striking Behavior)
@@ -536,6 +578,8 @@ export const PongView: React.FC<PongViewProps> = ({
       loop.stop();
       input.detach();
       juice.reset();
+      canvas.removeEventListener('pointermove', handleDirectPointer);
+      canvas.removeEventListener('pointerdown', handleDirectPointer);
       window.removeEventListener('resize', handleResize);
     };
   }, [isHost, bottomUid, topUid, isBottomPlayer, isBotPlaying, p1Nickname, p2Nickname, onDispatchAction]);
@@ -561,7 +605,7 @@ export const PongView: React.FC<PongViewProps> = ({
       {/* Massive Responsive Air Hockey Arena Stadium */}
       <div
         ref={containerRef}
-        className="w-full aspect-[3/4] h-[64vh] min-h-[460px] max-h-[640px] rounded-3xl overflow-hidden shadow-2xl border-4 border-cyan-500/40 cursor-ew-resize touch-none select-none relative"
+        className="w-full aspect-[3/4] h-[60vh] min-h-[440px] max-h-[620px] rounded-3xl overflow-hidden shadow-2xl border-4 border-cyan-500/40 cursor-ew-resize touch-none select-none relative"
         style={{
           boxShadow: '0 0 60px rgba(6, 182, 212, 0.25), 0 30px 80px rgba(0, 0, 0, 0.8)'
         }}
@@ -588,8 +632,28 @@ export const PongView: React.FC<PongViewProps> = ({
         </div>
       </div>
 
+      {/* Mobile Steering Touch Pads */}
+      <div className="w-full flex items-center justify-between gap-3 max-w-sm pt-1">
+        <button
+          onPointerDown={() => { mobileSteer.current.left = true; }}
+          onPointerUp={() => { mobileSteer.current.left = false; }}
+          onPointerLeave={() => { mobileSteer.current.left = false; }}
+          className="flex-1 h-12 rounded-2xl bg-slate-900/90 border-2 border-slate-700 active:scale-95 flex items-center justify-center text-xs font-black font-mono shadow-md hover:border-cyan-400 text-cyan-300"
+        >
+          ◀ SLIDE LEFT
+        </button>
+        <button
+          onPointerDown={() => { mobileSteer.current.right = true; }}
+          onPointerUp={() => { mobileSteer.current.right = false; }}
+          onPointerLeave={() => { mobileSteer.current.right = false; }}
+          className="flex-1 h-12 rounded-2xl bg-slate-900/90 border-2 border-slate-700 active:scale-95 flex items-center justify-center text-xs font-black font-mono shadow-md hover:border-cyan-400 text-cyan-300"
+        >
+          SLIDE RIGHT ▶
+        </button>
+      </div>
+
       <p className="text-xs text-slate-400 font-medium tracking-wide">
-        ⚡ Drag your circular mallet to strike the puck • First to {gameState.targetScore || 5} goals wins!
+        ⚡ Move mouse or finger to strike the puck • A/D or Arrow keys supported!
       </p>
     </div>
   );

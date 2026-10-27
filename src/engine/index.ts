@@ -8,6 +8,9 @@ import { createMemoryMatchInitialState } from './memoryMatchEngine';
 import { createNumberBlitzInitialState } from './numberBlitzEngine';
 import { createTapFrenzyInitialState } from './tapFrenzyEngine';
 import { createTankDuelInitialState } from './tankDuelEngine';
+import { createSlapDuelInitialState } from './slapDuelEngine';
+import { createKnifeMasterInitialState } from './knifeMasterEngine';
+import { createSumoSpinInitialState } from './sumoSpinEngine';
 
 export function initializeGameState(gameId: string, playerUids: string[]): any {
   switch (gameId) {
@@ -22,15 +25,21 @@ export function initializeGameState(gameId: string, playerUids: string[]): any {
     case 'pong':
       return createPongInitialState(playerUids, 5);
     case 'obstaclerush':
-      return createObstacleRushInitialState(playerUids);
+      return createObstacleRushInitialState(playerUids, 3);
     case 'memorymatch':
       return createMemoryMatchInitialState(playerUids);
     case 'numberblitz':
       return createNumberBlitzInitialState(playerUids, 45);
     case 'tapfrenzy':
-      return createTapFrenzyInitialState(playerUids, 30);
+      return createTapFrenzyInitialState(playerUids, 3);
     case 'tankduel':
       return createTankDuelInitialState(playerUids, 3);
+    case 'slapduel':
+      return createSlapDuelInitialState(playerUids, 5);
+    case 'knifemaster':
+      return createKnifeMasterInitialState(playerUids, 3);
+    case 'sumospin':
+      return createSumoSpinInitialState(playerUids, 3);
     default:
       return createTicTacToeInitialState(playerUids);
   }
@@ -46,3 +55,6 @@ export * from './memoryMatchEngine';
 export * from './numberBlitzEngine';
 export * from './tapFrenzyEngine';
 export * from './tankDuelEngine';
+export * from './slapDuelEngine';
+export * from './knifeMasterEngine';
+export * from './sumoSpinEngine';

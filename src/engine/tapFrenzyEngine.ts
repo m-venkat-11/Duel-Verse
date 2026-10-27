@@ -1,123 +1,117 @@
-import type { TapFrenzyState, FrenzyTarget } from '../types/game';
-
-function generateTarget(existingIds: Set<string>): FrenzyTarget {
-  const rand = Math.random();
-  let type: 'coin' | 'spark' | 'bomb' = 'coin';
-  let points = 10;
-  let lifespan = 2800;
-
-  if (rand < 0.25) {
-    type = 'bomb';
-    points = -25;
-    lifespan = 3200;
-  } else if (rand < 0.45) {
-    type = 'spark';
-    points = 30;
-    lifespan = 2200;
-  }
-
-  let id = `t_${Math.floor(Math.random() * 100000)}`;
-  while (existingIds.has(id)) {
-    id = `t_${Math.floor(Math.random() * 100000)}`;
-  }
-
-  return {
-    id,
-    type,
-    x: Math.floor(10 + Math.random() * 80),
-    y: Math.floor(15 + Math.random() * 70),
-    points,
-    expiresAt: Date.now() + lifespan
-  };
+export interface TapFrenzyState {
+  tugPosition: number; // -100 (P1 goal) to +100 (P2 goal), 0 = center
+  targetPosition: number; // 100
+  p1Taps: number;
+  p2Taps: number;
+  p1Cps?: number;
+  p2Cps?: number;
+  roundWinner: string | null;
+  roundNumber: number;
+  targetWins: number;
+  scores: Record<string, number>;
+  lastTapTimestamp: number;
 }
 
-export function createTapFrenzyInitialState(playerUids: string[], durationSec: number = 30): TapFrenzyState {
+export function createTapFrenzyInitialState(playerUids: string[], targetWins: number = 3): TapFrenzyState {
   const scores: Record<string, number> = {};
-  const frozenUntil: Record<string, number> = {};
-
   playerUids.forEach((uid) => {
     scores[uid] = 0;
-    frozenUntil[uid] = 0;
   });
 
-  const existingIds = new Set<string>();
-  const targets: FrenzyTarget[] = [];
-  for (let i = 0; i < 5; i++) {
-    const t = generateTarget(existingIds);
-    existingIds.add(t.id);
-    targets.push(t);
-  }
-
   return {
-    endTime: Date.now() + durationSec * 1000,
-    targets,
+    tugPosition: 0,
+    targetPosition: 100,
+    p1Taps: 0,
+    p2Taps: 0,
+    p1Cps: 0,
+    p2Cps: 0,
+    roundWinner: null,
+    roundNumber: 1,
+    targetWins,
     scores,
-    frozenUntil
+    lastTapTimestamp: Date.now()
   };
 }
 
-export function tapTarget(
+export function registerTugTap(
   state: TapFrenzyState,
   playerUid: string,
-  targetId: string
+  p1Uid: string,
+  multiplier: number = 1.0
 ): {
   newState: TapFrenzyState;
-  hitTarget: FrenzyTarget | null;
+  roundOver: boolean;
+  roundWinnerUid: string | null;
+  matchOver: boolean;
+  matchWinnerUid: string | null;
 } {
-  const now = Date.now();
-  if (state.frozenUntil[playerUid] && now < state.frozenUntil[playerUid]) {
-    // Player is currently frozen by bomb
-    return { newState: state, hitTarget: null };
+  if (state.roundWinner !== null) {
+    return {
+      newState: state,
+      roundOver: false,
+      roundWinnerUid: null,
+      matchOver: false,
+      matchWinnerUid: null
+    };
   }
 
-  const target = state.targets.find((t) => t.id === targetId);
-  if (!target) {
-    return { newState: state, hitTarget: null };
+  const isP1 = playerUid === p1Uid;
+  const pushDelta = (isP1 ? -3.4 : 3.4) * multiplier;
+  const nextPos = Math.max(-100, Math.min(100, state.tugPosition + pushDelta));
+
+  const nextP1Taps = isP1 ? state.p1Taps + 1 : state.p1Taps;
+  const nextP2Taps = isP1 ? state.p2Taps : state.p2Taps + 1;
+
+  let roundOver = false;
+  let roundWinnerUid: string | null = null;
+  let matchOver = false;
+  let matchWinnerUid: string | null = null;
+
+  let nextScores = { ...state.scores };
+
+  if (nextPos <= -100) {
+    // P1 wins round
+    roundOver = true;
+    roundWinnerUid = p1Uid;
+    nextScores[p1Uid] = (nextScores[p1Uid] || 0) + 1;
+    if (nextScores[p1Uid] >= state.targetWins) {
+      matchOver = true;
+      matchWinnerUid = p1Uid;
+    }
+  } else if (nextPos >= 100) {
+    // P2 wins round
+    const p2Uid = Object.keys(state.scores).find((uid) => uid !== p1Uid) || 'p2';
+    roundOver = true;
+    roundWinnerUid = p2Uid;
+    nextScores[p2Uid] = (nextScores[p2Uid] || 0) + 1;
+    if (nextScores[p2Uid] >= state.targetWins) {
+      matchOver = true;
+      matchWinnerUid = p2Uid;
+    }
   }
-
-  const nextTargets = state.targets.filter((t) => t.id !== targetId);
-
-  // Spawn replacement target
-  const existingIds = new Set(nextTargets.map((t) => t.id));
-  nextTargets.push(generateTarget(existingIds));
-
-  let frozenTime = state.frozenUntil[playerUid] || 0;
-  if (target.type === 'bomb') {
-    frozenTime = now + 1200; // 1.2s freeze
-  }
-
-  const nextScores = {
-    ...state.scores,
-    [playerUid]: Math.max(0, (state.scores[playerUid] || 0) + target.points)
-  };
 
   return {
     newState: {
       ...state,
-      targets: nextTargets,
+      tugPosition: nextPos,
+      p1Taps: nextP1Taps,
+      p2Taps: nextP2Taps,
+      roundWinner: roundWinnerUid,
       scores: nextScores,
-      frozenUntil: {
-        ...state.frozenUntil,
-        [playerUid]: frozenTime
-      }
+      lastTapTimestamp: Date.now()
     },
-    hitTarget: target
+    roundOver,
+    roundWinnerUid,
+    matchOver,
+    matchWinnerUid
   };
 }
 
-export function pruneExpiredTargets(state: TapFrenzyState): TapFrenzyState {
-  const now = Date.now();
-  const valid = state.targets.filter((t) => t.expiresAt > now);
-  const existingIds = new Set(valid.map((t) => t.id));
-
-  while (valid.length < 5) {
-    const t = generateTarget(existingIds);
-    existingIds.add(t.id);
-    valid.push(t);
-  }
-
+export function resetTapWarRound(state: TapFrenzyState): TapFrenzyState {
   return {
     ...state,
-    targets: valid
+    tugPosition: 0,
+    roundWinner: null,
+    roundNumber: state.roundNumber + 1
   };
 }

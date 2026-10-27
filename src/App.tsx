@@ -28,6 +28,9 @@ import { MemoryMatchView } from './components/games/MemoryMatchView';
 import { NumberBlitzView } from './components/games/NumberBlitzView';
 import { TapFrenzyView } from './components/games/TapFrenzyView';
 import { TankDuelView } from './components/games/TankDuelView';
+import { SlapDuelView } from './components/games/SlapDuelView';
+import { KnifeMasterView } from './components/games/KnifeMasterView';
+import { SumoSpinView } from './components/games/SumoSpinView';
 import {
   getCyberBotTicTacToeMove,
   getCyberBotConnectFourMove,
@@ -302,46 +305,8 @@ export function App() {
       }
     }
 
-    // 7. Tap Frenzy (High-value diamond/coin reflex snatcher, 0% bombs)
-    if (room.selectedGameId === 'tapfrenzy' && gs.targets && gs.targets.length > 0) {
-      const nonBomb = gs.targets.filter((t: any) => t.type !== 'bomb');
-      // Prioritize high-value sparks (+250) over coins (+100)
-      const spark = nonBomb.find((t: any) => t.type === 'spark');
-      const target = spark || (nonBomb.length > 0 ? nonBomb[Math.floor(Math.random() * nonBomb.length)] : null);
-
-      if (target) {
-        const timer = setTimeout(() => {
-          activeTransport.dispatchAction({
-            type: 'FRENZY_TAP',
-            roomId: room.roomId,
-            playerUid: botUid,
-            payload: { targetId: target.id },
-            timestamp: Date.now()
-          });
-        }, 280 + Math.random() * 180);
-        return () => clearTimeout(timer);
-      }
-    }
-
-    // 8. Obstacle Rush (High-speed competitive sprint runner)
-    if (room.selectedGameId === 'obstaclerush' && gs.players?.[botUid]) {
-      const botPlayer = gs.players[botUid];
-      if (botPlayer.finishTime === null) {
-        const timer = setTimeout(() => {
-          const sprintStep = botDifficulty === 'master' ? 48 + Math.random() * 20 : 36 + Math.random() * 18;
-          const nextY = Math.min(2400, botPlayer.y + sprintStep);
-          const nextX = 150 + Math.sin(nextY / 100) * 70;
-          activeTransport.dispatchAction({
-            type: 'OBSTACLE_MOVE',
-            roomId: room.roomId,
-            playerUid: botUid,
-            payload: { x: nextX, y: nextY, vx: 0, vy: 6 },
-            timestamp: Date.now()
-          });
-        }, 90);
-        return () => clearTimeout(timer);
-      }
-    }
+    // Note: Real-time physics/reflex games (tankduel, tapfrenzy, obstaclerush, slapduel, knifemaster, sumospin, pong)
+    // execute their sub-millisecond AI combat loops directly within their respective component GameLoops.
   }, [room?.status, room?.gameState, room?.selectedGameId, room?.roomId, room?.players, botDifficulty]);
 
   // Create Room Flow (Supports withBot for instant practice launch)
@@ -581,6 +546,30 @@ export function App() {
       case 'tankduel':
         return (
           <TankDuelView
+            room={room}
+            playerUid={profile.uid}
+            onDispatchAction={handleDispatchAction}
+          />
+        );
+      case 'slapduel':
+        return (
+          <SlapDuelView
+            room={room}
+            playerUid={profile.uid}
+            onDispatchAction={handleDispatchAction}
+          />
+        );
+      case 'knifemaster':
+        return (
+          <KnifeMasterView
+            room={room}
+            playerUid={profile.uid}
+            onDispatchAction={handleDispatchAction}
+          />
+        );
+      case 'sumospin':
+        return (
+          <SumoSpinView
             room={room}
             playerUid={profile.uid}
             onDispatchAction={handleDispatchAction}

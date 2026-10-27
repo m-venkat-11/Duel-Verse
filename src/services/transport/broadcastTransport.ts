@@ -8,8 +8,12 @@ import { registerReactionTap, resetReactionNextRound } from '../../engine/reacti
 import { updatePongPaddle, stepPongPhysics, resetPongServe } from '../../engine/pongEngine';
 import { flipMemoryCard, clearPlayerFlips } from '../../engine/memoryMatchEngine';
 import { submitBlitzAnswer } from '../../engine/numberBlitzEngine';
-import { tapTarget } from '../../engine/tapFrenzyEngine';
-import { updateObstaclePlayerPosition, triggerObstacleRespawn } from '../../engine/obstacleRushEngine';
+import { registerTugTap, resetTapWarRound } from '../../engine/tapFrenzyEngine';
+import { switchRunnerLane, registerRunnerFinish } from '../../engine/obstacleRushEngine';
+import { registerTankKill } from '../../engine/tankDuelEngine';
+import { registerSlapStrike } from '../../engine/slapDuelEngine';
+import { registerKnifeThrow, createKnifeMasterInitialState } from '../../engine/knifeMasterEngine';
+import { registerSumoRingOut } from '../../engine/sumoSpinEngine';
 
 function generateRoomCode(): string {
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -487,13 +491,28 @@ export class BroadcastTransport implements IRoomTransport {
         break;
       }
 
-      // --- Pong / Tank Goal (Authoritative) ---
-      case 'TANK_HIT':
+      // --- Tank Duel Kill ---
+      case 'TANK_KILL':
+      case 'TANK_HIT': {
+        const { killerUid, victimUid } = payload;
+        const res = registerTankKill(room.gameState, killerUid, victimUid);
+        room.gameState = res.newState;
+        if (killerUid && room.players[killerUid]) {
+          room.scores[killerUid] = (room.scores[killerUid] || 0) + 1;
+          if (res.matchOver) {
+            room.status = 'match_end';
+            room.matchWinnerUid = res.matchWinnerUid;
+          }
+        }
+        break;
+      }
+
+      // --- Pong Goal (Authoritative) ---
       case 'PONG_GOAL': {
         const { scorerUid } = payload;
         if (scorerUid && room.players[scorerUid]) {
           room.scores[scorerUid] = (room.scores[scorerUid] || 0) + 1;
-          const targetScore = room.gameState?.targetScore || (room.selectedGameId === 'tankduel' ? 3 : 5);
+          const targetScore = room.gameState?.targetScore || 5;
           if (room.scores[scorerUid] >= targetScore) {
             room.status = 'match_end';
             room.matchWinnerUid = scorerUid;
@@ -562,32 +581,108 @@ export class BroadcastTransport implements IRoomTransport {
         break;
       }
 
-      // --- Tap Frenzy Click ---
+      // --- Tap War / Tap Frenzy Mash ---
+      case 'TAP_WAR_MASH':
       case 'FRENZY_TAP':
       case 'TAPFRENZY_TAP': {
-        const { targetId } = payload;
-        const res = tapTarget(room.gameState, playerUid, targetId);
-        room.gameState = res.newState;
-        break;
-      }
-
-      // --- Obstacle Rush Move ---
-      case 'OBSTACLE_MOVE':
-      case 'OBSTACLE_UPDATE_POS': {
-        const { x, y, vx, vy } = payload;
-        const res = updateObstaclePlayerPosition(room.gameState, playerUid, x, y, vx, vy);
+        const { p1Uid, multiplier } = payload;
+        const res = registerTugTap(room.gameState, playerUid, p1Uid || playerUids[0], multiplier || 1.0);
         room.gameState = res.newState;
 
-        if (res.finished && res.winnerUid) {
-          room.scores[res.winnerUid] = (room.scores[res.winnerUid] || 0) + 1;
-          room.matchWinnerUid = res.winnerUid;
-          room.status = 'match_end';
+        if (res.roundOver && res.roundWinnerUid) {
+          room.scores[res.roundWinnerUid] = (room.scores[res.roundWinnerUid] || 0) + 1;
+          if (res.matchOver) {
+            room.status = 'match_end';
+            room.matchWinnerUid = res.matchWinnerUid;
+          } else {
+            // Auto-advance round after 1.6s
+            setTimeout(() => {
+              const currentRoom = this.getStoredRoom(action.roomId);
+              if (currentRoom && currentRoom.status === 'playing') {
+                currentRoom.gameState = resetTapWarRound(currentRoom.gameState);
+                this.saveAndBroadcast(currentRoom);
+              }
+            }, 1600);
+          }
         }
         break;
       }
 
-      case 'OBSTACLE_RESPAWN': {
-        room.gameState = triggerObstacleRespawn(room.gameState, playerUid);
+      // --- Obstacle Rush Runner ---
+      case 'RUNNER_LANE': {
+        const { targetLane } = payload;
+        room.gameState = switchRunnerLane(room.gameState, playerUid, targetLane);
+        break;
+      }
+
+      case 'RUNNER_FINISH': {
+        const { winnerUid } = payload;
+        const res = registerRunnerFinish(room.gameState, winnerUid);
+        room.gameState = res.newState;
+        if (winnerUid && room.players[winnerUid]) {
+          room.scores[winnerUid] = (room.scores[winnerUid] || 0) + 1;
+          if (res.matchOver) {
+            room.status = 'match_end';
+            room.matchWinnerUid = res.matchWinnerUid;
+          }
+        }
+        break;
+      }
+
+      // --- Slap Duel Strike ---
+      case 'SLAP_STRIKE': {
+        const { attackerUid, isDodging } = payload;
+        const res = registerSlapStrike(room.gameState, attackerUid, isDodging);
+        room.gameState = res.newState;
+
+        if (res.landed && attackerUid && room.players[attackerUid]) {
+          room.scores[attackerUid] = (room.scores[attackerUid] || 0) + 1;
+          if (res.matchOver) {
+            room.status = 'match_end';
+            room.matchWinnerUid = res.matchWinnerUid;
+          }
+        }
+        break;
+      }
+
+      // --- Knife Master Throw ---
+      case 'KNIFE_THROW': {
+        const { wheelAngle } = payload;
+        const res = registerKnifeThrow(room.gameState, playerUid, wheelAngle);
+        room.gameState = res.newState;
+
+        if (res.roundOver && res.roundWinnerUid) {
+          room.scores[res.roundWinnerUid] = (room.scores[res.roundWinnerUid] || 0) + 1;
+          if (res.matchOver) {
+            room.status = 'match_end';
+            room.matchWinnerUid = res.matchWinnerUid;
+          } else {
+            // Reset blades for next round after 1.8s
+            setTimeout(() => {
+              const currentRoom = this.getStoredRoom(action.roomId);
+              if (currentRoom && currentRoom.status === 'playing') {
+                currentRoom.gameState = createKnifeMasterInitialState(playerUids, currentRoom.gameState.targetScore);
+                this.saveAndBroadcast(currentRoom);
+              }
+            }, 1800);
+          }
+        }
+        break;
+      }
+
+      // --- Sumo Spinners Ring Out ---
+      case 'SUMO_RING_OUT': {
+        const { fallenUid } = payload;
+        const res = registerSumoRingOut(room.gameState, fallenUid);
+        room.gameState = res.newState;
+
+        if (res.winnerUid && room.players[res.winnerUid]) {
+          room.scores[res.winnerUid] = (room.scores[res.winnerUid] || 0) + 1;
+          if (res.matchOver) {
+            room.status = 'match_end';
+            room.matchWinnerUid = res.matchWinnerUid;
+          }
+        }
         break;
       }
 

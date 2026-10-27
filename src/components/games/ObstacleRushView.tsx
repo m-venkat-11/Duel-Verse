@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { ObstacleRushState, ObstaclePlayer } from '../../types/game';
 import type { AuthoritativeRoomState } from '../../types/room';
-import { COURSE_LENGTH } from '../../engine/obstacleRushEngine';
+import type { ObstacleRushState, RunnerHazard } from '../../engine/obstacleRushEngine';
+import { GameLoop } from '../../engine/core/GameLoop';
+import { CanvasManager } from '../../engine/core/CanvasManager';
+import { JuiceEngine } from '../../engine/core/JuiceEngine';
 import { soundService } from '../../services/sound';
-import { ArrowLeft, ArrowRight, Zap, Flag } from 'lucide-react';
+import { Zap, ChevronLeft, ChevronRight, Flag, Flame, Sparkles } from 'lucide-react';
 
 interface ObstacleRushViewProps {
   room: AuthoritativeRoomState<ObstacleRushState>;
@@ -16,327 +18,373 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({
   playerUid,
   onDispatchAction
 }) => {
-  const gameState = room.gameState;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const myPlayer = gameState.players[playerUid] || {
-    uid: playerUid,
-    x: 200,
-    y: 50,
-    vx: 0,
-    vy: 0,
-    checkpoint: 0,
-    isGrounded: true,
-    isStunned: false,
-    stunUntil: 0,
-    finishTime: null
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const gameState = room.gameState;
+  const players = Object.keys(room.players);
+  const p1Uid = players[0] || 'p1';
+  const p2Uid = players[1] || 'p2';
+  const isP1 = playerUid === p1Uid;
+  const isHost = room.hostUid === playerUid;
+  const isBotPlaying = Boolean(room.players['bot_rival'] || p2Uid === 'bot_rival');
+
+  const p1Nickname = room.players[p1Uid]?.nickname || 'Player 1';
+  const p2Nickname = room.players[p2Uid]?.nickname || 'CyberBot AI';
+
+  const [winnerName, setWinnerName] = useState<string | null>(null);
+  const [nitroAvailable, setNitroAvailable] = useState<boolean>(true);
+
+  // Local simulated positions (interpolated at 60 FPS)
+  const simDistances = useRef<{ [uid: string]: number }>({
+    [p1Uid]: 0,
+    [p2Uid]: 0
+  });
+  const simSpeeds = useRef<{ [uid: string]: number }>({
+    [p1Uid]: 22,
+    [p2Uid]: 22
+  });
+  const simLanes = useRef<{ [uid: string]: number }>({
+    [p1Uid]: 1,
+    [p2Uid]: 1
+  });
+  const visualLanes = useRef<{ [uid: string]: number }>({
+    [p1Uid]: 1,
+    [p2Uid]: 1
+  });
+
+  const handleSwitchLane = (delta: number) => {
+    const currentLane = simLanes.current[playerUid] || 1;
+    const nextLane = Math.max(0, Math.min(2, currentLane + delta));
+    if (nextLane !== currentLane) {
+      simLanes.current[playerUid] = nextLane;
+      soundService.playMove();
+      onDispatchAction('RUNNER_LANE', { targetLane: nextLane });
+    }
   };
 
-  const [inputState, setInputState] = useState({ left: false, right: false, forward: false });
+  const handleNitro = () => {
+    if (!nitroAvailable) return;
+    setNitroAvailable(false);
+    simSpeeds.current[playerUid] = 38; // boost
+    soundService.playSignalAlert?.();
+    setTimeout(() => {
+      simSpeeds.current[playerUid] = 22;
+    }, 1200);
+    setTimeout(() => {
+      setNitroAvailable(true);
+    }, 4000);
+  };
 
-  // Keyboard controls listener
+  // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') setInputState((s) => ({ ...s, left: true }));
-      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') setInputState((s) => ({ ...s, right: true }));
-      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') setInputState((s) => ({ ...s, forward: true }));
+      if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') {
+        handleSwitchLane(-1);
+      } else if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') {
+        handleSwitchLane(1);
+      } else if (e.key === ' ' || e.key === 'ArrowUp' || e.key.toLowerCase() === 'w') {
+        handleNitro();
+      }
     };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') setInputState((s) => ({ ...s, left: false }));
-      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') setInputState((s) => ({ ...s, right: false }));
-      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') setInputState((s) => ({ ...s, forward: false }));
-    };
-
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, []);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [nitroAvailable]);
 
-  // Local movement loop dispatching updates
+  // Main 60 FPS Simulation & Rendering
   useEffect(() => {
-    if (room.status !== 'playing' || myPlayer.finishTime !== null) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    const interval = setInterval(() => {
-      let vx = 0;
-      let vy = 0;
-      const speed = 5.5;
+    const canvasMgr = new CanvasManager(canvas);
+    const juice = new JuiceEngine(300);
 
-      if (inputState.left) vx -= speed;
-      if (inputState.right) vx += speed;
-      if (inputState.forward) vy += speed * 1.4;
+    const W = 640;
+    const H = 480;
+    const COURSE_MAX = 1000;
 
-      // Passive runner forward velocity
-      vy += 2.5;
+    let finishReported = false;
 
-      let nextX = Math.max(65, Math.min(335, myPlayer.x + vx));
-      let nextY = myPlayer.y + vy;
+    const update = (dt: number) => {
+      juice.update(dt);
 
-      // Check collision with deterministic rotating hazards
-      const elapsed = Date.now() - gameState.startTime;
-      for (const hazard of gameState.hazards) {
-        if (Math.abs(nextY - hazard.trackY) < 30) {
-          const angle = ((elapsed % hazard.periodMs) / hazard.periodMs) * Math.PI * 2;
-          const hazardTipX = 200 + Math.cos(angle) * (hazard.width / 2);
-          if (Math.abs(nextX - hazardTipX) < 34) {
-            soundService.playFalseStart();
-            onDispatchAction('OBSTACLE_RESPAWN', {});
-            return;
+      // Smooth lane visual interpolation
+      for (const uid of [p1Uid, p2Uid]) {
+        const target = simLanes.current[uid] ?? 1;
+        visualLanes.current[uid] += (target - visualLanes.current[uid]) * 0.25;
+
+        // Advance distance
+        const speed = simSpeeds.current[uid] ?? 22;
+        simDistances.current[uid] += speed * dt;
+
+        // Check hazard collisions for each player
+        const dist = simDistances.current[uid];
+        for (const h of gameState.hazards) {
+          if (Math.abs(dist - h.distance) < 8) {
+            const currentLane = simLanes.current[uid];
+            if (currentLane === h.lane) {
+              if (h.type === 'boost') {
+                simSpeeds.current[uid] = 36;
+                juice.emitSparks(W / 2, H / 2, 10, '#10b981', '#34d399', 3);
+                soundService.playScore();
+                setTimeout(() => { simSpeeds.current[uid] = 22; }, 1000);
+              } else {
+                // Stumble on barrier or EMP
+                simSpeeds.current[uid] = 10;
+                juice.addTrauma(0.25);
+                soundService.playFalseStart();
+                setTimeout(() => { simSpeeds.current[uid] = 22; }, 800);
+              }
+            }
+          }
+        }
+
+        // Check course finish
+        if (simDistances.current[uid] >= COURSE_MAX && !finishReported) {
+          finishReported = true;
+          const winnerUid = uid;
+          setWinnerName(winnerUid === p1Uid ? p1Nickname : p2Nickname);
+          soundService.playVictory();
+          if (isHost) {
+            onDispatchAction('RUNNER_FINISH', { winnerUid });
           }
         }
       }
 
-      onDispatchAction('OBSTACLE_MOVE', { x: nextX, y: nextY, vx, vy });
-    }, 1000 / 30);
-
-    return () => clearInterval(interval);
-  }, [inputState, myPlayer, gameState.startTime, gameState.hazards, room.status, onDispatchAction]);
-
-  // High-FPS Canvas Neon Runner Rendering
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const width = canvas.width;
-    const height = canvas.height;
-
-    // Camera keeps player positioned at 75% down the screen looking ahead
-    const cameraY = myPlayer.y - height * 0.72;
-
-    // Background deep cyber space
-    ctx.fillStyle = '#060913';
-    ctx.fillRect(0, 0, width, height);
-
-    // Glowing vertical track
-    const trackLeft = 50;
-    const trackWidth = 300;
-    const trackRight = trackLeft + trackWidth;
-
-    // Track surface with subtle gradient
-    const trackGrad = ctx.createLinearGradient(trackLeft, 0, trackRight, 0);
-    trackGrad.addColorStop(0, '#0f172a');
-    trackGrad.addColorStop(0.5, '#1e293b');
-    trackGrad.addColorStop(1, '#0f172a');
-    ctx.fillStyle = trackGrad;
-    ctx.fillRect(trackLeft, 0, trackWidth, height);
-
-    // Dynamic animated lane markers moving downward to convey speed
-    const roadOffset = (myPlayer.y * 1.5) % 40;
-    ctx.strokeStyle = '#334155';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([16, 24]);
-    ctx.lineDashOffset = -roadOffset;
-
-    // Two dashed lane dividers
-    ctx.beginPath();
-    ctx.moveTo(150, 0);
-    ctx.lineTo(150, height);
-    ctx.moveTo(250, 0);
-    ctx.lineTo(250, height);
-    ctx.stroke();
-    ctx.setLineDash([]); // reset dash
-
-    // Neon glowing outer rails
-    ctx.strokeStyle = '#06B6D4';
-    ctx.lineWidth = 4;
-    ctx.shadowColor = '#06B6D4';
-    ctx.shadowBlur = 10;
-    ctx.beginPath();
-    ctx.moveTo(trackLeft, 0);
-    ctx.lineTo(trackLeft, height);
-    ctx.moveTo(trackRight, 0);
-    ctx.lineTo(trackRight, height);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // Draw Checkpoint 1 (Y = 700)
-    const cp1ScreenY = 700 - cameraY;
-    if (cp1ScreenY > -30 && cp1ScreenY < height + 30) {
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.3)';
-      ctx.fillRect(trackLeft, cp1ScreenY - 10, trackWidth, 20);
-      ctx.strokeStyle = '#38BDF8';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(trackLeft, cp1ScreenY - 10, trackWidth, 20);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 12px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('⚡ CHECKPOINT 1 ⚡', 200, cp1ScreenY + 4);
-    }
-
-    // Draw Checkpoint 2 (Y = 1400)
-    const cp2ScreenY = 1400 - cameraY;
-    if (cp2ScreenY > -30 && cp2ScreenY < height + 30) {
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.3)';
-      ctx.fillRect(trackLeft, cp2ScreenY - 10, trackWidth, 20);
-      ctx.strokeStyle = '#F59E0B';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(trackLeft, cp2ScreenY - 10, trackWidth, 20);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 12px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('⚡ CHECKPOINT 2 ⚡', 200, cp2ScreenY + 4);
-    }
-
-    // Draw Finish Line Arch (Y = COURSE_LENGTH)
-    const finishScreenY = COURSE_LENGTH - cameraY;
-    if (finishScreenY > -40 && finishScreenY < height + 40) {
-      ctx.fillStyle = '#10B981';
-      ctx.fillRect(trackLeft, finishScreenY - 16, trackWidth, 32);
-      ctx.fillStyle = '#FFFFFF';
-      for (let c = 0; c < 12; c++) {
-        if (c % 2 === 0) {
-          ctx.fillRect(trackLeft + c * 25, finishScreenY - 16, 25, 16);
-          ctx.fillRect(trackLeft + (c + 1) * 25, finishScreenY, 25, 16);
+      // CyberBot AI Lane Dodging
+      if (isHost && isBotPlaying) {
+        const botDist = simDistances.current[p2Uid];
+        // Look ahead 40-70m for hazards
+        const upcomingHazard = gameState.hazards.find(
+          (h) => h.distance > botDist + 15 && h.distance < botDist + 65
+        );
+        if (upcomingHazard) {
+          if (upcomingHazard.type === 'boost') {
+            // Seek boost pad
+            simLanes.current[p2Uid] = upcomingHazard.lane;
+          } else if (upcomingHazard.lane === simLanes.current[p2Uid]) {
+            // Dodge obstacle into alternate lane
+            simLanes.current[p2Uid] = (upcomingHazard.lane + 1) % 3;
+          }
         }
       }
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '900 14px Outfit, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('🏁 FINISH ARCH 🏁', 200, finishScreenY - 22);
-    }
+    };
 
-    // Hazards (Rotating Laser Blades)
-    const elapsed = Date.now() - gameState.startTime;
-    gameState.hazards.forEach((hazard) => {
-      const hazardScreenY = hazard.trackY - cameraY;
-      if (hazardScreenY > -70 && hazardScreenY < height + 70) {
-        const angle = ((elapsed % hazard.periodMs) / hazard.periodMs) * Math.PI * 2;
-        ctx.save();
-        ctx.translate(200, hazardScreenY);
-        ctx.rotate(angle);
-
-        // Warning Danger Zone
-        ctx.strokeStyle = '#EF4444';
-        ctx.lineWidth = 6;
-        ctx.shadowColor = '#EF4444';
-        ctx.shadowBlur = 12;
-        ctx.beginPath();
-        ctx.moveTo(-hazard.width / 2, 0);
-        ctx.lineTo(hazard.width / 2, 0);
-        ctx.stroke();
-
-        // Laser Blades Heads
-        ctx.fillStyle = '#DC2626';
-        ctx.beginPath();
-        ctx.arc(-hazard.width / 2 + 10, 0, 15, 0, Math.PI * 2);
-        ctx.arc(hazard.width / 2 - 10, 0, 15, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Center Laser Hub
-        ctx.fillStyle = '#FFFFFF';
-        ctx.beginPath();
-        ctx.arc(0, 0, 10, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-    });
-
-    // Draw All Players
-    Object.values(gameState.players).forEach((p: ObstaclePlayer) => {
-      const pScreenY = p.y - cameraY;
-      const isMe = p.uid === playerUid;
-      const playerColor = isMe ? '#F59E0B' : '#06B6D4';
+    const render = () => {
+      const ctx = canvasMgr.ctx;
+      ctx.clearRect(0, 0, canvasMgr.width, canvasMgr.height);
 
       ctx.save();
-      // Glowing aura
-      ctx.fillStyle = playerColor;
-      ctx.shadowColor = playerColor;
-      ctx.shadowBlur = 16;
-      ctx.beginPath();
-      ctx.arc(p.x, pScreenY, 16, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.translate(juice.offsetX, juice.offsetY);
 
-      // Core sphere
-      ctx.fillStyle = '#FFFFFF';
-      ctx.beginPath();
-      ctx.arc(p.x - 3, pScreenY - 3, 5, 0, Math.PI * 2);
-      ctx.fill();
+      const scaleX = canvasMgr.width / W;
+      const scaleY = canvasMgr.height / H;
+      ctx.scale(scaleX, scaleY);
 
-      // Border ring
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(p.x, pScreenY, 16, 0, Math.PI * 2);
-      ctx.stroke();
+      // Deep cyber background
+      ctx.fillStyle = '#060913';
+      ctx.fillRect(0, 0, W, H);
 
-      // Gamer Tag Above Sphere
-      const name = room.players[p.uid]?.nickname || 'Player';
-      const avatar = room.players[p.uid]?.avatarId || '👤';
-      ctx.font = 'bold 11px Outfit, sans-serif';
-      ctx.fillStyle = '#FFFFFF';
-      ctx.textAlign = 'center';
-      ctx.shadowColor = '#000000';
-      ctx.shadowBlur = 4;
-      ctx.fillText(`${avatar} ${name}`, p.x, pScreenY - 22);
+      // Render 2 Dual Split Tracks (Top Track = P1, Bottom Track = P2)
+      const trackH = 210;
+      const tracks = [
+        { uid: p1Uid, name: p1Nickname, topY: 20, color: '#f59e0b', trackLabel: 'PLAYER 1 TRACK' },
+        { uid: p2Uid, name: p2Nickname, topY: 250, color: '#06b6d4', trackLabel: 'PLAYER 2 TRACK' }
+      ];
+
+      tracks.forEach((track, tIdx) => {
+        const myDist = simDistances.current[track.uid] || 0;
+        const vLane = visualLanes.current[track.uid] || 1;
+
+        // Track surface with perspective gradient
+        const surfGrad = ctx.createLinearGradient(0, track.topY, W, track.topY);
+        surfGrad.addColorStop(0, '#0f172a');
+        surfGrad.addColorStop(0.5, '#1e293b');
+        surfGrad.addColorStop(1, '#0f172a');
+        ctx.fillStyle = surfGrad;
+        ctx.fillRect(20, track.topY, W - 40, trackH);
+
+        // Neon border
+        ctx.strokeStyle = track.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(20, track.topY, W - 40, trackH);
+
+        // 3 Highway Lanes (Lane 0 = top, Lane 1 = mid, Lane 2 = bottom)
+        const laneHeight = trackH / 3;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.setLineDash([16, 20]);
+        // Fast horizontal scrolling effect
+        ctx.lineDashOffset = -(myDist * 6) % 36;
+        for (let l = 1; l < 3; l++) {
+          ctx.beginPath();
+          ctx.moveTo(20, track.topY + l * laneHeight);
+          ctx.lineTo(W - 20, track.topY + l * laneHeight);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        // Render Hazards on this Track
+        for (const h of gameState.hazards) {
+          const relDist = h.distance - myDist;
+          // Visible window ahead: 0 to 180m
+          if (relDist >= -20 && relDist <= 180) {
+            const hx = 90 + (relDist / 180) * (W - 140);
+            const hy = track.topY + h.lane * laneHeight + laneHeight / 2;
+
+            if (h.type === 'boost') {
+              // Green Turbo Pad
+              ctx.fillStyle = '#10b981';
+              ctx.shadowColor = '#10b981';
+              ctx.shadowBlur = 12;
+              ctx.beginPath();
+              ctx.roundRect(hx - 14, hy - 16, 28, 32, 6);
+              ctx.fill();
+              ctx.shadowBlur = 0;
+              ctx.fillStyle = '#ffffff';
+              ctx.font = 'bold 16px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.fillText('⚡', hx, hy + 5);
+            } else {
+              // Red Laser Barrier or EMP
+              ctx.fillStyle = '#f43f5e';
+              ctx.shadowColor = '#f43f5e';
+              ctx.shadowBlur = 14;
+              ctx.beginPath();
+              ctx.roundRect(hx - 12, hy - 20, 24, 40, 6);
+              ctx.fill();
+              ctx.shadowBlur = 0;
+              ctx.fillStyle = '#ffffff';
+              ctx.font = 'bold 16px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.fillText('⚠️', hx, hy + 5);
+            }
+          }
+        }
+
+        // Render Cyber Racer Vehicle
+        const racerX = 90;
+        const racerY = track.topY + vLane * laneHeight + laneHeight / 2;
+
+        ctx.save();
+        ctx.translate(racerX, racerY);
+
+        // Thruster flame exhaust
+        ctx.fillStyle = track.color;
+        ctx.shadowColor = track.color;
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.moveTo(-16, -6);
+        ctx.lineTo(-30 - Math.random() * 8, 0);
+        ctx.lineTo(-16, 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Armored Racer Chassis
+        ctx.fillStyle = '#0f172a';
+        ctx.strokeStyle = track.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(-16, -14, 34, 28, 8);
+        ctx.fill();
+        ctx.stroke();
+
+        // Cockpit Neon Glass
+        ctx.fillStyle = track.color;
+        ctx.beginPath();
+        ctx.roundRect(0, -7, 12, 14, 4);
+        ctx.fill();
+
+        ctx.restore();
+
+        // Track Name & Speed HUD
+        ctx.fillStyle = track.color;
+        ctx.font = 'bold 12px "Outfit", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${track.name.toUpperCase()} • ${Math.round(myDist)}m / 1000m`, 30, track.topY + 18);
+      });
+
+      // Finish Arch / Winner Celebration
+      if (winnerName) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = '900 36px "Outfit", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.shadowColor = '#fbbf24';
+        ctx.shadowBlur = 20;
+        ctx.fillText(`🏆 ${winnerName.toUpperCase()} WON THE RACE!`, W / 2, H / 2);
+        ctx.shadowBlur = 0;
+      }
 
       ctx.restore();
-    });
-  }, [myPlayer.y, gameState, playerUid, room.players]);
+    };
 
-  const progressPercent = Math.min(100, Math.round((myPlayer.y / COURSE_LENGTH) * 100));
+    const loop = new GameLoop({ update, render });
+    loop.start();
+
+    return () => loop.stop();
+  }, [p1Uid, p2Uid, isHost, isBotPlaying, p1Nickname, p2Nickname, onDispatchAction]);
+
+  const p1Dist = simDistances.current[p1Uid] || 0;
+  const p2Dist = simDistances.current[p2Uid] || 0;
 
   return (
-    <div className="w-full max-w-md mx-auto flex flex-col items-center select-none">
+    <div ref={containerRef} className="w-full max-w-2xl mx-auto flex flex-col items-center select-none gap-2.5 px-2">
       {/* Race Progress Bar */}
-      <div className="w-full bg-slate-900/90 rounded-2xl p-2.5 border border-slate-700/80 mb-2.5 shadow-xl">
-        <div className="flex items-center justify-between text-xs font-bold text-slate-300 mb-1 font-['Outfit']">
-          <span className="flex items-center gap-1.5 text-amber-400">
-            <Flag className="w-3.5 h-3.5" /> <span>RACE COURSE</span>
-          </span>
-          <span className="font-mono text-cyan-400 text-sm font-extrabold">{progressPercent}% FINISHED</span>
+      <div className="w-full p-3 rounded-2xl bg-slate-900/90 border border-slate-700/60 shadow-md">
+        <div className="flex items-center justify-between text-xs font-mono font-bold mb-1.5">
+          <span className="text-amber-400">P1: {Math.min(1000, Math.round(p1Dist))}m</span>
+          <span className="text-slate-400 font-mono">🏁 1000m FINISH ARCH</span>
+          <span className="text-cyan-400">P2: {Math.min(1000, Math.round(p2Dist))}m</span>
         </div>
-        <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden p-0.5 border border-slate-800">
+        <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden flex relative">
           <div
-            className="h-full bg-gradient-to-r from-violet-500 via-amber-500 to-emerald-400 rounded-full transition-all duration-100 shadow-md"
-            style={{ width: `${progressPercent}%` }}
+            className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-75"
+            style={{ width: `${Math.min(100, (p1Dist / 1000) * 100)}%` }}
           />
         </div>
       </div>
 
-      {/* Cyber Track Canvas */}
-      <div className="w-full aspect-[4/5] bg-slate-950 rounded-3xl border-2 border-cyan-500/50 relative overflow-hidden shadow-2xl">
-        <canvas ref={canvasRef} width={400} height={500} className="w-full h-full block" />
+      {/* Cyber Sprint Canvas */}
+      <div className="w-full aspect-[4/3] rounded-3xl overflow-hidden shadow-2xl border-2 border-orange-500/40 relative bg-slate-950">
+        <canvas ref={canvasRef} className="w-full h-full block" />
       </div>
 
-      {/* Modern 2-Player Touch Controls */}
-      <div className="grid grid-cols-3 gap-2.5 w-full mt-2.5">
+      {/* Mobile Lane Switch Touch Pads & Nitro */}
+      <div className="w-full grid grid-cols-3 gap-3 max-w-md pt-1">
         <button
-          onPointerDown={() => setInputState((s) => ({ ...s, left: true }))}
-          onPointerUp={() => setInputState((s) => ({ ...s, left: false }))}
-          className="btn-arcade h-16 flex flex-col items-center justify-center gap-0.5 active:scale-95 touch-none rounded-2xl bg-slate-800 border-slate-600"
-          aria-label="Steer Left"
+          onClick={() => handleSwitchLane(-1)}
+          className="h-14 rounded-2xl bg-slate-900 border-2 border-slate-700 active:scale-95 flex items-center justify-center gap-1 text-sm font-black font-mono text-slate-200 hover:border-cyan-400 shadow-lg"
         >
-          <ArrowLeft className="w-6 h-6 text-white" />
-          <span className="text-[10px] font-black text-slate-300 font-mono">LEFT</span>
+          <ChevronLeft className="w-5 h-5" />
+          <span>LANE LEFT</span>
         </button>
 
         <button
-          onPointerDown={() => setInputState((s) => ({ ...s, forward: true }))}
-          onPointerUp={() => setInputState((s) => ({ ...s, forward: false }))}
-          className="btn-arcade btn-arcade-cyan h-16 flex flex-col items-center justify-center gap-0.5 active:scale-95 touch-none rounded-2xl"
-          aria-label="Turbo Boost"
+          onClick={handleNitro}
+          disabled={!nitroAvailable}
+          className={`h-14 rounded-2xl border-2 flex items-center justify-center gap-1.5 text-xs font-black font-mono shadow-xl active:scale-95 transition ${
+            nitroAvailable
+              ? 'bg-gradient-to-r from-emerald-500 to-teal-400 border-emerald-300 text-slate-950'
+              : 'bg-slate-800 border-slate-700 text-slate-500 opacity-60'
+          }`}
         >
-          <Zap className="w-6 h-6 fill-current text-white" />
-          <span className="text-[10px] font-black text-white font-mono">BOOST</span>
+          <Zap className="w-4 h-4 fill-current" />
+          <span>{nitroAvailable ? 'NITRO!' : 'RECHARGE'}</span>
         </button>
 
         <button
-          onPointerDown={() => setInputState((s) => ({ ...s, right: true }))}
-          onPointerUp={() => setInputState((s) => ({ ...s, right: false }))}
-          className="btn-arcade h-16 flex flex-col items-center justify-center gap-0.5 active:scale-95 touch-none rounded-2xl bg-slate-800 border-slate-600"
-          aria-label="Steer Right"
+          onClick={() => handleSwitchLane(1)}
+          className="h-14 rounded-2xl bg-slate-900 border-2 border-slate-700 active:scale-95 flex items-center justify-center gap-1 text-sm font-black font-mono text-slate-200 hover:border-cyan-400 shadow-lg"
         >
-          <ArrowRight className="w-6 h-6 text-white" />
-          <span className="text-[10px] font-black text-slate-300 font-mono">RIGHT</span>
+          <span>LANE RIGHT</span>
+          <ChevronRight className="w-5 h-5" />
         </button>
       </div>
 
-      <p className="text-[11px] text-slate-400 mt-2 font-medium hidden sm:block">
-        Desktop: <kbd className="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-slate-300">A / D</kbd> or <kbd className="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-slate-300">← / →</kbd> to steer • <kbd className="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-slate-300">Space</kbd> to boost
+      <p className="text-xs text-slate-400 font-mono text-center">
+        ⌨️ Desktop: A/D or Arrow Keys to switch lanes • Space for Nitro Boost!
       </p>
     </div>
   );
