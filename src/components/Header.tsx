@@ -56,8 +56,8 @@ export const Header: React.FC<HeaderProps> = ({
           }}
           title="Click to view Arcade Intro"
         >
-          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-violet-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-violet-500/20 group-hover:scale-105 transition-transform">
-            <Swords className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl overflow-hidden border border-cyan-400/50 shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-transform bg-slate-900">
+            <img src="/assets/duelverse_logo.jpg" alt="DuelVerse Logo" className="w-full h-full object-cover" />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
