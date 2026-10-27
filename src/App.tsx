@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { getOrCreatePlayerProfile, updatePlayerStats, type LocalPlayerProfile } from './services/player';
 import { soundService } from './services/sound';
 import { activeTransport } from './services/transport';
@@ -8,6 +8,7 @@ import { Header } from './components/Header';
 import { HomeView } from './components/HomeView';
 import { LobbyView } from './components/LobbyView';
 import { Scoreboard } from './components/Scoreboard';
+import { ArenaStage } from './components/ArenaStage';
 import { CountdownOverlay } from './components/CountdownOverlay';
 import { RematchModal } from './components/RematchModal';
 import { QRCodeModal } from './components/QRCodeModal';
@@ -25,12 +26,24 @@ import { ObstacleRushView } from './components/games/ObstacleRushView';
 import { MemoryMatchView } from './components/games/MemoryMatchView';
 import { NumberBlitzView } from './components/games/NumberBlitzView';
 import { TapFrenzyView } from './components/games/TapFrenzyView';
+import { TankDuelView } from './components/games/TankDuelView';
+import {
+  getCyberBotTicTacToeMove,
+  getCyberBotConnectFourMove,
+  getCyberBotRPSChoice,
+  getCyberBotReactionDelay,
+  getCyberBotMathAnswer,
+  type BotDifficulty
+} from './engine/cyberBotAi';
 
 export function App() {
   const [profile, setProfile] = useState<LocalPlayerProfile>(getOrCreatePlayerProfile);
   const [room, setRoom] = useState<AuthoritativeRoomState | null>(null);
   const [isMuted, setIsMuted] = useState<boolean>(soundService.getMuted());
   const [showCountdown, setShowCountdown] = useState<boolean>(false);
+  const [botDifficulty, setBotDifficulty] = useState<BotDifficulty>('master');
+  const rpsHistoryRef = useRef<Array<{ humanChoice: string; botChoice: string; winner: string | null }>>([]);
+  const cardMemoryRef = useRef<Map<number, string>>(new Map());
 
   // Modals state
   const [showQRModal, setShowQRModal] = useState<boolean>(false);
@@ -67,14 +80,22 @@ export function App() {
     }
   }, []);
 
+  const roomRef = React.useRef<AuthoritativeRoomState | null>(room);
+  roomRef.current = room;
+
   // Room Subscription & Heartbeat listener
   useEffect(() => {
     if (!room) return;
 
-    // Heartbeat every 3.5s
+    // Heartbeat every 3s using live ref to avoid stale closures
     const heartbeatTimer = setInterval(() => {
-      activeTransport.sendHeartbeat(room.roomId, profile.uid);
-    }, 3500);
+      const live = roomRef.current;
+      if (!live) return;
+      activeTransport.sendHeartbeat(live.roomId, profile.uid);
+      if (live.players['bot_rival']) {
+        activeTransport.sendHeartbeat(live.roomId, 'bot_rival');
+      }
+    }, 3000);
 
     // Subscribe to authoritative room updates
     const unsubscribe = activeTransport.subscribe(room.roomId, (updatedRoom) => {
@@ -103,18 +124,16 @@ export function App() {
     }
   }, [room?.status, room?.matchWinnerUid, profile.uid]);
 
-  // AI Practice Rival Move Dispatcher (for single-player testing)
+  // AI Practice Rival Move Dispatcher (Master-tier competitive AI for ALL games)
   useEffect(() => {
-    if (!room || room.status !== 'playing' || !room.players['bot_rival']) return;
+    if (!room || room.status !== 'playing' || !room.players['bot_rival'] || !room.gameState) return;
     const botUid = 'bot_rival';
+    const gs = room.gameState;
 
-    // 1. Tic-Tac-Toe
-    if (room.selectedGameId === 'tictactoe' && room.gameState?.currentTurn === botUid && !room.gameState.winningLine && !room.gameState.isDraw) {
-      const openIndices = room.gameState.board
-        .map((val: string | null, idx: number) => (val === null ? idx : -1))
-        .filter((idx: number) => idx !== -1);
-      if (openIndices.length > 0) {
-        const choice = openIndices[Math.floor(Math.random() * openIndices.length)];
+    // 1. Tic-Tac-Toe (Unbeatable Minimax on Master)
+    if (room.selectedGameId === 'tictactoe' && gs.currentTurn === botUid && !gs.winningLine && !gs.isDraw) {
+      const choice = getCyberBotTicTacToeMove(gs.board, botUid, profile.uid, botDifficulty);
+      if (choice !== -1) {
         const timer = setTimeout(() => {
           activeTransport.dispatchAction({
             type: 'TICTACTOE_MOVE',
@@ -123,16 +142,15 @@ export function App() {
             payload: { cellIndex: choice },
             timestamp: Date.now()
           });
-        }, 600);
+        }, 420);
         return () => clearTimeout(timer);
       }
     }
 
-    // 2. Connect Four
-    if (room.selectedGameId === 'connectfour' && room.gameState?.currentTurn === botUid && !room.gameState.winningCoords) {
-      const openCols = [0, 1, 2, 3, 4, 5, 6].filter((c) => room.gameState.grid[0][c] === null);
-      if (openCols.length > 0) {
-        const choice = openCols[Math.floor(Math.random() * openCols.length)];
+    // 2. Connect Four (Tactical Multi-step Lookahead)
+    if (room.selectedGameId === 'connectfour' && gs.currentTurn === botUid && !gs.winningCoords) {
+      const choice = getCyberBotConnectFourMove(gs.grid, botUid, profile.uid, botDifficulty);
+      if (choice !== -1) {
         const timer = setTimeout(() => {
           activeTransport.dispatchAction({
             type: 'CONNECTFOUR_DROP',
@@ -141,30 +159,186 @@ export function App() {
             payload: { col: choice },
             timestamp: Date.now()
           });
-        }, 700);
+        }, 480);
         return () => clearTimeout(timer);
       }
     }
 
-    // 3. Rock Paper Scissors
-    if (room.selectedGameId === 'rps' && room.gameState?.phase === 'choosing' && !room.gameState.commits[botUid]) {
-      const choices = ['rock', 'paper', 'scissors'];
-      const choice = choices[Math.floor(Math.random() * choices.length)];
+    // 3. Rock Paper Scissors (Adaptive Psychological Markov Prediction)
+    if (room.selectedGameId === 'rps') {
+      if (gs.phase === 'revealed' && gs.choices[profile.uid] && gs.choices[botUid]) {
+        // Track round history
+        const lastEntry = rpsHistoryRef.current[rpsHistoryRef.current.length - 1];
+        if (!lastEntry || lastEntry.humanChoice !== gs.choices[profile.uid]) {
+          rpsHistoryRef.current.push({
+            humanChoice: gs.choices[profile.uid],
+            botChoice: gs.choices[botUid],
+            winner: gs.roundWinner === profile.uid ? 'human' : gs.roundWinner === botUid ? 'bot' : null
+          });
+        }
+      } else if (gs.phase === 'choosing' && !gs.commits[botUid]) {
+        const choice = getCyberBotRPSChoice(rpsHistoryRef.current, botDifficulty);
+        const timer = setTimeout(() => {
+          activeTransport.dispatchAction({
+            type: 'RPS_CHOOSE',
+            roomId: room.roomId,
+            playerUid: botUid,
+            payload: { choice },
+            timestamp: Date.now()
+          });
+        }, 450);
+        return () => clearTimeout(timer);
+      }
+    }
+
+    // 4. Reaction Rush (Superhuman sub-210ms reflex on Master)
+    if (room.selectedGameId === 'reactionrush' && gs.phase === 'countdown' && !gs.reactionTimes?.[botUid]) {
+      const delayUntilSignal = Math.max(0, gs.signalScheduledAt - Date.now());
+      const botReactionMs = getCyberBotReactionDelay(botDifficulty);
       const timer = setTimeout(() => {
         activeTransport.dispatchAction({
-          type: 'RPS_CHOOSE',
+          type: 'REACTION_TAP',
           roomId: room.roomId,
           playerUid: botUid,
-          payload: { choice },
+          payload: { tapTimestamp: Date.now() },
           timestamp: Date.now()
         });
-      }, 700);
+      }, delayUntilSignal + botReactionMs);
       return () => clearTimeout(timer);
     }
-  }, [room?.status, room?.gameState, room?.selectedGameId, room?.roomId, room?.players]);
 
-  // Create Room Flow
-  const handleCreateRoom = async (gameId: string, maxRounds: number) => {
+    // 5. Number Blitz (Lightning mental math with 96% accuracy on Master)
+    if (room.selectedGameId === 'numberblitz') {
+      const botQIdx = gs.playerQuestionIndex?.[botUid] || 0;
+      const q = gs.questions?.[botQIdx];
+      if (q) {
+        const { chosenIndex, delayMs } = getCyberBotMathAnswer(q.correctIndex, botDifficulty);
+        const timer = setTimeout(() => {
+          activeTransport.dispatchAction({
+            type: 'BLITZ_ANSWER',
+            roomId: room.roomId,
+            playerUid: botUid,
+            payload: { chosenIndex },
+            timestamp: Date.now()
+          });
+        }, delayMs);
+        return () => clearTimeout(timer);
+      }
+    }
+
+    // 6. Memory Match (Photographic Neural Memory Tracking)
+    if (room.selectedGameId === 'memorymatch') {
+      // Remember any cards currently revealed or flipped by either player
+      gs.cards?.forEach((c: any, idx: number) => {
+        const isFlippedByHuman = gs.playerFlips?.[profile.uid]?.includes(idx);
+        const isFlippedByBot = gs.playerFlips?.[botUid]?.includes(idx);
+        if (isFlippedByHuman || isFlippedByBot || c.isMatched) {
+          cardMemoryRef.current.set(idx, c.pairId);
+        }
+      });
+
+      const flips = gs.playerFlips?.[botUid] || [];
+      if (flips.length < 2) {
+        let chosenCardIndex = -1;
+        const unmatched = gs.cards
+          ?.map((c: any, idx: number) => (!c.isMatched && !flips.includes(idx) ? idx : -1))
+          .filter((idx: number) => idx !== -1);
+
+        if (unmatched && unmatched.length > 0) {
+          if (flips.length === 1) {
+            // Card 1 is already flipped: does Bot remember where its twin is?
+            const card1 = gs.cards[flips[0]];
+            if (card1) {
+              for (const [knownIdx, pairId] of cardMemoryRef.current.entries()) {
+                if (knownIdx !== flips[0] && pairId === card1.pairId && !gs.cards[knownIdx]?.isMatched) {
+                  chosenCardIndex = knownIdx;
+                  break;
+                }
+              }
+            }
+          } else if (flips.length === 0) {
+            // Check if Bot already knows any pair in memory
+            const pairMap: Record<string, number[]> = {};
+            for (const [knownIdx, pairId] of cardMemoryRef.current.entries()) {
+              if (!gs.cards[knownIdx]?.isMatched) {
+                if (!pairMap[pairId]) pairMap[pairId] = [];
+                pairMap[pairId].push(knownIdx);
+              }
+            }
+            for (const indices of Object.values(pairMap)) {
+              if (indices.length >= 2) {
+                chosenCardIndex = indices[0];
+                break;
+              }
+            }
+          }
+
+          if (chosenCardIndex === -1) {
+            // Pick unvisited card if possible, else random unmatched
+            const unvisited = unmatched.filter((idx: number) => !cardMemoryRef.current.has(idx));
+            chosenCardIndex = unvisited.length > 0
+              ? unvisited[Math.floor(Math.random() * unvisited.length)]
+              : unmatched[Math.floor(Math.random() * unmatched.length)];
+          }
+
+          const timer = setTimeout(() => {
+            activeTransport.dispatchAction({
+              type: 'MEMORY_FLIP',
+              roomId: room.roomId,
+              playerUid: botUid,
+              payload: { cardIndex: chosenCardIndex },
+              timestamp: Date.now()
+            });
+          }, 450);
+          return () => clearTimeout(timer);
+        }
+      }
+    }
+
+    // 7. Tap Frenzy (High-value diamond/coin reflex snatcher, 0% bombs)
+    if (room.selectedGameId === 'tapfrenzy' && gs.targets && gs.targets.length > 0) {
+      const nonBomb = gs.targets.filter((t: any) => t.type !== 'bomb');
+      // Prioritize high-value sparks (+250) over coins (+100)
+      const spark = nonBomb.find((t: any) => t.type === 'spark');
+      const target = spark || (nonBomb.length > 0 ? nonBomb[Math.floor(Math.random() * nonBomb.length)] : null);
+
+      if (target) {
+        const timer = setTimeout(() => {
+          activeTransport.dispatchAction({
+            type: 'FRENZY_TAP',
+            roomId: room.roomId,
+            playerUid: botUid,
+            payload: { targetId: target.id },
+            timestamp: Date.now()
+          });
+        }, 280 + Math.random() * 180);
+        return () => clearTimeout(timer);
+      }
+    }
+
+    // 8. Obstacle Rush (High-speed competitive sprint runner)
+    if (room.selectedGameId === 'obstaclerush' && gs.players?.[botUid]) {
+      const botPlayer = gs.players[botUid];
+      if (botPlayer.finishTime === null) {
+        const timer = setTimeout(() => {
+          const sprintStep = botDifficulty === 'master' ? 48 + Math.random() * 20 : 36 + Math.random() * 18;
+          const nextY = Math.min(2400, botPlayer.y + sprintStep);
+          const nextX = 150 + Math.sin(nextY / 100) * 70;
+          activeTransport.dispatchAction({
+            type: 'OBSTACLE_MOVE',
+            roomId: room.roomId,
+            playerUid: botUid,
+            payload: { x: nextX, y: nextY, vx: 0, vy: 6 },
+            timestamp: Date.now()
+          });
+        }, 90);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [room?.status, room?.gameState, room?.selectedGameId, room?.roomId, room?.players, botDifficulty]);
+
+  // Create Room Flow (Supports withBot for instant practice launch)
+  const handleCreateRoom = async (gameId: string, maxRounds: number = 3, withBot: boolean = false) => {
     try {
       const playerSession = {
         uid: profile.uid,
@@ -179,9 +353,24 @@ export function App() {
       };
 
       const newRoomId = await activeTransport.createRoom(playerSession, gameId, maxRounds);
-      // Update URL query without full reload
       const newUrl = `${window.location.pathname}?room=${newRoomId}`;
       window.history.pushState({ room: newRoomId }, '', newUrl);
+
+      if (withBot) {
+        const botPlayer = {
+          uid: 'bot_rival',
+          nickname: 'CyberBot ⚡',
+          avatarId: '🤖',
+          role: 'guest' as const,
+          isReady: true,
+          isConnected: true,
+          lastPing: Date.now(),
+          clientVersion: '1.0.0',
+          stats: { wins: 0, losses: 0, draws: 0 }
+        };
+        await activeTransport.joinRoom(newRoomId, botPlayer);
+        await activeTransport.startGame(newRoomId);
+      }
 
       // Subscribe and set
       activeTransport.subscribe(newRoomId, (r) => setRoom(r));
@@ -190,9 +379,11 @@ export function App() {
     }
   };
 
-  // Join Room Flow
+  // Join Room Flow with Automatic Code Normalization
   const handleJoinRoom = async (roomId: string) => {
     try {
+      const clean = roomId.trim().toUpperCase();
+      const normalizedRoomId = clean.startsWith('DV-') ? clean : `DV-${clean}`;
       const playerSession = {
         uid: profile.uid,
         nickname: profile.nickname,
@@ -205,11 +396,11 @@ export function App() {
         stats: profile.stats
       };
 
-      const res = await activeTransport.joinRoom(roomId, playerSession);
+      const res = await activeTransport.joinRoom(normalizedRoomId, playerSession);
       if (res.success) {
-        const newUrl = `${window.location.pathname}?room=${roomId}`;
-        window.history.pushState({ room: roomId }, '', newUrl);
-        activeTransport.subscribe(roomId, (r) => setRoom(r));
+        const newUrl = `${window.location.pathname}?room=${normalizedRoomId}`;
+        window.history.pushState({ room: normalizedRoomId }, '', newUrl);
+        activeTransport.subscribe(normalizedRoomId, (r) => setRoom(r));
       } else {
         alert(res.error || 'Failed to join room');
       }
@@ -380,6 +571,14 @@ export function App() {
             onDispatchAction={handleDispatchAction}
           />
         );
+      case 'tankduel':
+        return (
+          <TankDuelView
+            room={room}
+            playerUid={profile.uid}
+            onDispatchAction={handleDispatchAction}
+          />
+        );
       default:
         return (
           <TicTacToeView
@@ -408,7 +607,7 @@ export function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col items-center justify-center p-3 sm:p-6 w-full">
+      <main className={`flex-1 flex flex-col items-center w-full ${!room ? 'justify-start' : 'justify-start pt-3 sm:pt-4'} p-2 sm:p-4`}>
         {!room ? (
           // Landing & Home View
           <HomeView
@@ -431,11 +630,18 @@ export function App() {
             onNotifyToast={addToast}
           />
         ) : (
-          // Active Gameplay View
-          <div className="w-full flex flex-col items-center flex-1 justify-center">
-            <Scoreboard room={room} playerUid={profile.uid} />
+          // Active Gameplay View with Full Arena Framing
+          <ArenaStage
+            room={room}
+            playerUid={profile.uid}
+            botDifficulty={botDifficulty}
+            onSetBotDifficulty={(d) => setBotDifficulty(d)}
+            onLeaveRoom={handleLeaveRoom}
+            isMuted={isMuted}
+            onToggleMute={handleToggleMute}
+          >
             {renderGameView()}
-          </div>
+          </ArenaStage>
         )}
       </main>
 

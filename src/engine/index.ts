@@ -7,6 +7,7 @@ import { createObstacleRushInitialState } from './obstacleRushEngine';
 import { createMemoryMatchInitialState } from './memoryMatchEngine';
 import { createNumberBlitzInitialState } from './numberBlitzEngine';
 import { createTapFrenzyInitialState } from './tapFrenzyEngine';
+import { createTankDuelInitialState } from './tankDuelEngine';
 
 export function initializeGameState(gameId: string, playerUids: string[]): any {
   switch (gameId) {
@@ -28,6 +29,8 @@ export function initializeGameState(gameId: string, playerUids: string[]): any {
       return createNumberBlitzInitialState(playerUids, 45);
     case 'tapfrenzy':
       return createTapFrenzyInitialState(playerUids, 30);
+    case 'tankduel':
+      return createTankDuelInitialState(playerUids, 3);
     default:
       return createTicTacToeInitialState(playerUids);
   }
@@ -42,3 +45,4 @@ export * from './obstacleRushEngine';
 export * from './memoryMatchEngine';
 export * from './numberBlitzEngine';
 export * from './tapFrenzyEngine';
+export * from './tankDuelEngine';

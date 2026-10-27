@@ -1,13 +1,20 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useRef } from 'react';
 import type { TapFrenzyState } from '../../types/game';
 import type { AuthoritativeRoomState } from '../../types/room';
 import { soundService } from '../../services/sound';
-import { Crosshair, AlertTriangle } from 'lucide-react';
 
 interface TapFrenzyViewProps {
   room: AuthoritativeRoomState<TapFrenzyState>;
   playerUid: string;
   onDispatchAction: (type: string, payload: any) => void;
+}
+
+interface FloatingScore {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+  color: string;
 }
 
 export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({
@@ -16,64 +23,153 @@ export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({
   onDispatchAction
 }) => {
   const gameState = room.gameState;
-  const isHost = room.hostUid === playerUid;
-  const myScore = gameState.scores[playerUid] || 0;
-  const isFrozen = gameState.frozenUntil[playerUid] && Date.now() < gameState.frozenUntil[playerUid];
+  const myScore = gameState.scores?.[playerUid] || 0;
+  const isFrozen = gameState.frozenUntil?.[playerUid] && Date.now() < gameState.frozenUntil[playerUid];
+  const [floatingScores, setFloatingScores] = useState<FloatingScore[]>([]);
+  const arenaRef = useRef<HTMLDivElement>(null);
 
-  const handleTapTarget = (targetId: string, type: string) => {
+  const opponent = Object.values(room.players).find(p => p.uid !== playerUid);
+  const opScore = gameState.scores?.[opponent?.uid || ''] || 0;
+
+  const handleTapTarget = (targetId: string, type: string, x: number, y: number) => {
     if (isFrozen) return;
 
-    if (type === 'bomb') {
-      soundService.playFalseStart();
-    } else {
-      soundService.playScore();
-    }
+    const floatId = Math.random().toString(36).substr(2, 9);
+    let text = '+100';
+    let color = '#f59e0b';
+    if (type === 'spark') { text = '+250'; color = '#22d3ee'; soundService.playScore?.(); }
+    else if (type === 'bomb') { text = '-150'; color = '#f43f5e'; soundService.playFalseStart?.(); }
+    else { soundService.playScore?.(); }
+
+    setFloatingScores(prev => [...prev, { id: floatId, x, y, text, color }]);
+    setTimeout(() => setFloatingScores(prev => prev.filter(f => f.id !== floatId)), 800);
+
     onDispatchAction('FRENZY_TAP', { targetId });
   };
 
+  const getTargetStyle = (type: string) => {
+    if (type === 'coin') return {
+      bg: 'radial-gradient(circle at 35% 35%, #fbbf24, #b45309)',
+      border: '2px solid #fcd34d',
+      shadow: '0 0 20px rgba(245,158,11,0.6)',
+      icon: '🪙',
+    };
+    if (type === 'spark') return {
+      bg: 'radial-gradient(circle at 35% 35%, #22d3ee, #0e7490)',
+      border: '2px solid #67e8f9',
+      shadow: '0 0 24px rgba(6,182,212,0.7)',
+      icon: '💎',
+    };
+    return {
+      bg: 'radial-gradient(circle at 35% 35%, #f43f5e, #9f1239)',
+      border: '2px solid #fda4af',
+      shadow: '0 0 20px rgba(244,63,94,0.6)',
+      icon: '💣',
+    };
+  };
+
   return (
-    <div className="w-full max-w-sm mx-auto flex flex-col items-center">
-      {/* Score Header */}
-      <div className="mb-3 flex items-center justify-between w-full px-4 py-2 rounded-xl bg-slate-900/80 border border-slate-700/80 text-xs font-bold font-['Outfit']">
-        <div className="flex items-center gap-1.5 text-yellow-400">
-          <Crosshair className="w-4 h-4" />
-          <span>TAP TARGETS!</span>
+    <div className="w-full max-w-xl mx-auto flex flex-col items-center select-none gap-2">
+      {/* Score Race Bar */}
+      <div className="w-full flex items-center gap-2 px-3 py-2 rounded-2xl bg-slate-900/90 border border-slate-700/60">
+        <div className="flex-1 text-center">
+          <div className="text-xl font-black font-mono text-amber-400">{myScore}</div>
+          <div className="text-[10px] text-amber-300 font-bold">YOU</div>
         </div>
-        <div className="font-mono text-white text-sm">
-          {myScore} PTS
+        <div className="flex-1 h-3 bg-slate-800 rounded-full overflow-hidden relative">
+          <div
+            className="h-full bg-gradient-to-r from-amber-500 to-amber-400 transition-all duration-200 rounded-full"
+            style={{ width: `${Math.min(100, (myScore / Math.max(myScore + opScore, 1)) * 100)}%` }}
+          />
+        </div>
+        <div className="flex-1 text-center">
+          <div className="text-xl font-black font-mono text-cyan-400">{opScore}</div>
+          <div className="text-[10px] text-cyan-300 font-bold">{opponent?.nickname?.split(' ')[0] || 'RIVAL'}</div>
         </div>
       </div>
 
-      {/* Target Arena */}
-      <div className="w-full aspect-square bg-slate-950/90 rounded-2xl border-2 border-yellow-500/30 relative overflow-hidden shadow-2xl p-4 select-none">
-        {/* Frozen Overlay */}
+      {/* Tap Arena */}
+      <div
+        ref={arenaRef}
+        className="w-full relative overflow-hidden touch-none select-none rounded-3xl border-2 shadow-2xl"
+        style={{
+          aspectRatio: '1 / 1',
+          background: 'radial-gradient(ellipse at center, #0a1628 0%, #030810 100%)',
+          border: '2px solid rgba(245,158,11,0.3)',
+          boxShadow: '0 0 40px rgba(245,158,11,0.08), 0 20px 60px rgba(0,0,0,0.6)',
+        }}
+      >
+        {/* Subtle grid */}
+        <div className="absolute inset-0 opacity-5 pointer-events-none"
+          style={{ backgroundImage: 'linear-gradient(rgba(245,158,11,1) 1px, transparent 1px), linear-gradient(90deg, rgba(245,158,11,1) 1px, transparent 1px)', backgroundSize: '32px 32px' }}
+        />
+
+        {/* Frozen overlay */}
         {isFrozen && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-red-950/70 backdrop-blur-sm animate-pulse">
-            <AlertTriangle className="w-12 h-12 text-red-400 mb-1" />
-            <span className="text-xl font-black font-['Outfit'] text-red-300">
-              FROZEN BY BOMB!
-            </span>
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center rounded-3xl animate-pulse"
+            style={{ background: 'rgba(6,182,212,0.15)', backdropFilter: 'blur(4px)' }}
+          >
+            <span className="text-6xl mb-1">❄️</span>
+            <span className="text-2xl font-black font-mono text-cyan-300 tracking-wider">STUNNED!</span>
+            <span className="text-xs text-cyan-200 mt-1">1 second freeze</span>
           </div>
         )}
 
         {/* Dynamic Targets */}
-        {gameState.targets.map((target) => (
-          <button
-            key={target.id}
-            onClick={() => handleTapTarget(target.id, target.type)}
-            style={{ left: `${target.x}%`, top: `${target.y}%` }}
-            className={`absolute -translate-x-1/2 -translate-y-1/2 w-12 h-12 rounded-2xl flex items-center justify-center text-2xl transition-transform active:scale-75 shadow-lg border-2 cursor-pointer ${
-              target.type === 'coin'
-                ? 'bg-amber-500/30 border-amber-400 shadow-amber-500/40'
-                : target.type === 'spark'
-                ? 'bg-cyan-500/30 border-cyan-400 shadow-cyan-500/40'
-                : 'bg-rose-600/30 border-rose-500 shadow-rose-600/40 animate-pulse'
-            }`}
+        {gameState.targets?.map((target) => {
+          const style = getTargetStyle(target.type);
+          return (
+            <button
+              key={target.id}
+              onClick={() => handleTapTarget(target.id, target.type, target.x, target.y)}
+              style={{
+                position: 'absolute',
+                left: `${target.x}%`,
+                top: `${target.y}%`,
+                transform: 'translate(-50%, -50%)',
+                width: '60px',
+                height: '60px',
+                borderRadius: '18px',
+                background: style.bg,
+                border: style.border,
+                boxShadow: style.shadow,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '30px',
+                cursor: 'pointer',
+                transition: 'transform 0.1s',
+                animation: 'popIn 0.2s ease-out forwards',
+              }}
+              className="active:scale-75 touch-manipulation"
+            >
+              {style.icon}
+            </button>
+          );
+        })}
+
+        {/* Floating score animations */}
+        {floatingScores.map(f => (
+          <div
+            key={f.id}
+            className="absolute pointer-events-none font-black text-2xl font-mono select-none"
+            style={{
+              left: `${f.x}%`,
+              top: `${f.y}%`,
+              transform: 'translate(-50%, -200%)',
+              color: f.color,
+              textShadow: `0 0 10px ${f.color}`,
+              animation: 'floatUp 0.8s ease-out forwards',
+            }}
           >
-            {target.type === 'coin' ? '🪙' : target.type === 'spark' ? '💎' : '💣'}
-          </button>
+            {f.text}
+          </div>
         ))}
       </div>
+
+      <p className="text-[11px] text-slate-500 font-medium">
+        🪙 Coins +100 · 💎 Gems +250 · 💣 Bombs -150 (avoid!)
+      </p>
     </div>
   );
 };

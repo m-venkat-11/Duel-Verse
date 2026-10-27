@@ -158,3 +158,58 @@ export function dropDisc(
 
   return { newState, roundOver: false, winnerUid: null, isDraw: false };
 }
+
+export function getBestConnectFourMove(
+  grid: (string | null)[][],
+  botUid: string,
+  opponentUid: string
+): number {
+  const openCols = [0, 1, 2, 3, 4, 5, 6].filter((c) => grid[0][c] === null);
+  if (openCols.length === 0) return 3;
+
+  const getRow = (g: (string | null)[][], c: number) => {
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (g[r][c] === null) return r;
+    }
+    return -1;
+  };
+
+  // 1. Can bot win in 1 move? Take the win!
+  for (const c of openCols) {
+    const r = getRow(grid, c);
+    if (r !== -1) {
+      grid[r][c] = botUid;
+      const { winnerUid } = checkFourInARow(grid);
+      grid[r][c] = null;
+      if (winnerUid === botUid) return c;
+    }
+  }
+
+  // 2. Can opponent win in 1 move? Block them!
+  for (const c of openCols) {
+    const r = getRow(grid, c);
+    if (r !== -1) {
+      grid[r][c] = opponentUid;
+      const { winnerUid } = checkFourInARow(grid);
+      grid[r][c] = null;
+      if (winnerUid === opponentUid) return c;
+    }
+  }
+
+  // 3. Avoid giving opponent an immediate win right above us
+  const safeCols = openCols.filter((c) => {
+    const r = getRow(grid, c);
+    if (r > 0) {
+      grid[r - 1][c] = opponentUid;
+      const { winnerUid } = checkFourInARow(grid);
+      grid[r - 1][c] = null;
+      return winnerUid !== opponentUid;
+    }
+    return true;
+  });
+
+  const candidates = safeCols.length > 0 ? safeCols : openCols;
+  // Center column strategic preference (column 3 is center)
+  candidates.sort((a, b) => Math.abs(a - 3) - Math.abs(b - 3));
+  return candidates[0];
+}

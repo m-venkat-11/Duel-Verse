@@ -48,8 +48,8 @@ export function stepPongPhysics(
   }
 
   const [bottomUid, topUid] = playerUids;
-  let nextX = state.ballX + state.vx * state.speed;
-  let nextY = state.ballY + state.vy * state.speed;
+  let nextX = state.ballX + state.vx * state.speed * 1.6;
+  let nextY = state.ballY + state.vy * state.speed * 1.6;
   let nextVx = state.vx;
   let nextVy = state.vy;
   let nextSpeed = state.speed;

@@ -51,6 +51,11 @@ const COVER_MAP: Record<string, { image: string; fallbackGradient: string; title
     image: '/assets/tap_frenzy_cover.jpg',
     fallbackGradient: 'from-yellow-500 via-amber-600 to-rose-600',
     title: 'Tap Frenzy'
+  },
+  tankduel: {
+    image: '/assets/tank_duel_cover.jpg',
+    fallbackGradient: 'from-emerald-600 via-teal-500 to-cyan-600',
+    title: 'Tank Duel'
   }
 };
 

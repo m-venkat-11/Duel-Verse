@@ -165,7 +165,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="Edit Profile"
           >
             <span className="text-base leading-none">{playerAvatar}</span>
-            <span className="text-xs font-bold text-slate-200 max-w-[80px] truncate hidden sm:inline">
+            <span className="text-xs font-black text-slate-200 max-w-[140px] truncate hidden sm:inline font-['Outfit']">
               {playerNickname}
             </span>
           </button>

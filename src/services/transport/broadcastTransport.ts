@@ -1,9 +1,9 @@
 import type { AuthoritativeRoomState, PlayerSession, RoomAction } from '../../types/room';
 import type { IRoomTransport } from './types';
 import { initializeGameState } from '../../engine';
-import { processTicTacToeMove } from '../../engine/tictactoeEngine';
+import { processTicTacToeMove, createTicTacToeInitialState } from '../../engine/tictactoeEngine';
 import { commitRPSChoice, resetRPSNextRound } from '../../engine/rpsEngine';
-import { dropDisc } from '../../engine/connectFourEngine';
+import { dropDisc, createConnectFourInitialState } from '../../engine/connectFourEngine';
 import { registerReactionTap, resetReactionNextRound } from '../../engine/reactionRushEngine';
 import { updatePongPaddle, stepPongPhysics, resetPongServe } from '../../engine/pongEngine';
 import { flipMemoryCard, clearPlayerFlips } from '../../engine/memoryMatchEngine';
@@ -14,7 +14,7 @@ import { updateObstaclePlayerPosition, triggerObstacleRespawn } from '../../engi
 function generateRoomCode(): string {
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
   let code = '';
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return `DV-${code}`;
@@ -37,6 +37,10 @@ export class BroadcastTransport implements IRoomTransport {
       this.channels.set(roomId, channel);
     }
     return this.channels.get(roomId)!;
+  }
+
+  public getStoredRoomDirect(roomId: string): AuthoritativeRoomState | null {
+    return this.getStoredRoom(roomId);
   }
 
   private getStoredRoom(roomId: string): AuthoritativeRoomState | null {
@@ -253,9 +257,15 @@ export class BroadcastTransport implements IRoomTransport {
     room.players[playerUid].lastPing = now;
     room.players[playerUid].isConnected = true;
 
-    // Check opponent connection status (grace period: 7s without ping)
+    // Check opponent connection status (grace period: 25s without ping)
     Object.values(room.players).forEach((p) => {
-      if (p.uid !== playerUid && now - p.lastPing > 7000) {
+      // Practice AI bots are locally simulated and never disconnect
+      if (p.uid === 'bot_rival' || p.uid.startsWith('bot_') || p.nickname.includes('Bot')) {
+        p.isConnected = true;
+        p.lastPing = now;
+        return;
+      }
+      if (p.uid !== playerUid && now - p.lastPing > 25000) {
         p.isConnected = false;
       }
     });
@@ -268,6 +278,9 @@ export class BroadcastTransport implements IRoomTransport {
     if (!room) return;
 
     room.rematchVotes[playerUid] = true;
+    if (room.players['bot_rival'] || Object.keys(room.players).some(uid => uid.startsWith('bot_'))) {
+      room.rematchVotes['bot_rival'] = true;
+    }
 
     const playerUids = Object.keys(room.players);
     const bothVoted = playerUids.length >= 2 && playerUids.every((uid) => room.rematchVotes[uid]);
@@ -350,11 +363,28 @@ export class BroadcastTransport implements IRoomTransport {
               room.status = 'match_end';
               room.matchWinnerUid = res.winnerUid;
             } else {
-              room.status = 'round_end';
+              // Smooth auto-advance to next round after 1.8 seconds
+              setTimeout(() => {
+                const currentRoom = this.getStoredRoom(action.roomId);
+                if (currentRoom && currentRoom.status === 'playing') {
+                  currentRoom.currentRound += 1;
+                  currentRoom.roundWinnerUid = null;
+                  currentRoom.gameState = createTicTacToeInitialState(playerUids);
+                  this.saveAndBroadcast(currentRoom);
+                }
+              }, 1800);
             }
           } else if (res.isDraw) {
             room.roundWinnerUid = 'draw';
-            room.status = 'round_end';
+            setTimeout(() => {
+              const currentRoom = this.getStoredRoom(action.roomId);
+              if (currentRoom && currentRoom.status === 'playing') {
+                currentRoom.currentRound += 1;
+                currentRoom.roundWinnerUid = null;
+                currentRoom.gameState = createTicTacToeInitialState(playerUids);
+                this.saveAndBroadcast(currentRoom);
+              }
+            }, 1800);
           }
         }
         break;
@@ -399,11 +429,28 @@ export class BroadcastTransport implements IRoomTransport {
               room.status = 'match_end';
               room.matchWinnerUid = res.winnerUid;
             } else {
-              room.status = 'round_end';
+              // Smooth auto-advance to next round after 1.8 seconds
+              setTimeout(() => {
+                const currentRoom = this.getStoredRoom(action.roomId);
+                if (currentRoom && currentRoom.status === 'playing') {
+                  currentRoom.currentRound += 1;
+                  currentRoom.roundWinnerUid = null;
+                  currentRoom.gameState = createConnectFourInitialState(playerUids);
+                  this.saveAndBroadcast(currentRoom);
+                }
+              }, 1800);
             }
           } else if (res.isDraw) {
             room.roundWinnerUid = 'draw';
-            room.status = 'round_end';
+            setTimeout(() => {
+              const currentRoom = this.getStoredRoom(action.roomId);
+              if (currentRoom && currentRoom.status === 'playing') {
+                currentRoom.currentRound += 1;
+                currentRoom.roundWinnerUid = null;
+                currentRoom.gameState = createConnectFourInitialState(playerUids);
+                this.saveAndBroadcast(currentRoom);
+              }
+            }, 1800);
           }
         }
         break;
@@ -437,6 +484,21 @@ export class BroadcastTransport implements IRoomTransport {
       case 'PONG_PADDLE': {
         const { xPos } = payload;
         room.gameState = updatePongPaddle(room.gameState, playerUid, xPos);
+        break;
+      }
+
+      // --- Pong / Tank Goal (Authoritative) ---
+      case 'TANK_HIT':
+      case 'PONG_GOAL': {
+        const { scorerUid } = payload;
+        if (scorerUid && room.players[scorerUid]) {
+          room.scores[scorerUid] = (room.scores[scorerUid] || 0) + 1;
+          const targetScore = room.gameState?.targetScore || (room.selectedGameId === 'tankduel' ? 3 : 5);
+          if (room.scores[scorerUid] >= targetScore) {
+            room.status = 'match_end';
+            room.matchWinnerUid = scorerUid;
+          }
+        }
         break;
       }
 
@@ -492,7 +554,8 @@ export class BroadcastTransport implements IRoomTransport {
       }
 
       // --- Number Blitz Answer ---
-      case 'BLITZ_ANSWER': {
+      case 'BLITZ_ANSWER':
+      case 'NUMBERBLITZ_ANSWER': {
         const { chosenIndex } = payload;
         const res = submitBlitzAnswer(room.gameState, playerUid, chosenIndex);
         room.gameState = res.newState;
@@ -500,7 +563,8 @@ export class BroadcastTransport implements IRoomTransport {
       }
 
       // --- Tap Frenzy Click ---
-      case 'FRENZY_TAP': {
+      case 'FRENZY_TAP':
+      case 'TAPFRENZY_TAP': {
         const { targetId } = payload;
         const res = tapTarget(room.gameState, playerUid, targetId);
         room.gameState = res.newState;
@@ -508,7 +572,8 @@ export class BroadcastTransport implements IRoomTransport {
       }
 
       // --- Obstacle Rush Move ---
-      case 'OBSTACLE_MOVE': {
+      case 'OBSTACLE_MOVE':
+      case 'OBSTACLE_UPDATE_POS': {
         const { x, y, vx, vy } = payload;
         const res = updateObstaclePlayerPosition(room.gameState, playerUid, x, y, vx, vy);
         room.gameState = res.newState;

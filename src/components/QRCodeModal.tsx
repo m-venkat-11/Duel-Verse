@@ -12,10 +12,17 @@ interface QRCodeModalProps {
 export const QRCodeModal: React.FC<QRCodeModalProps> = ({ roomId, isOpen, onClose }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [copied, setCopied] = React.useState(false);
+  const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const [useLanIp, setUseLanIp] = React.useState(isLocalhost);
+  const detectedLanIp = '172.17.188.91:5173';
 
-  const joinUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}${window.location.pathname}?room=${roomId}`
-    : `https://duelverse.app?room=${roomId}`;
+  const baseOrigin = typeof window !== 'undefined'
+    ? isLocalhost && useLanIp
+      ? `http://${detectedLanIp}`
+      : window.location.origin
+    : `https://duelverse.app`;
+
+  const joinUrl = `${baseOrigin}${typeof window !== 'undefined' ? window.location.pathname : ''}?room=${roomId}`;
 
   useEffect(() => {
     if (isOpen && canvasRef.current) {
@@ -70,9 +77,20 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({ roomId, isOpen, onClos
         </p>
 
         {/* QR Code Canvas */}
-        <div className="p-3 bg-white rounded-2xl shadow-xl inline-block mx-auto mb-4 border-2 border-violet-500/40">
+        <div className="p-3 bg-white rounded-2xl shadow-xl inline-block mx-auto mb-3 border-2 border-violet-500/40">
           <canvas ref={canvasRef} className="rounded-xl block" />
         </div>
+
+        {isLocalhost && (
+          <div className="mb-3 flex items-center justify-center gap-2">
+            <button
+              onClick={() => setUseLanIp(!useLanIp)}
+              className="text-[11px] font-mono px-3 py-1 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-300 transition"
+            >
+              {useLanIp ? '📶 Wi-Fi Phone Scan (172.17.188.91)' : '💻 Localhost'}
+            </button>
+          </div>
+        )}
 
         {/* Room Code Badge */}
         <div className="bg-slate-900/80 border border-slate-700/80 rounded-xl p-3 mb-4">

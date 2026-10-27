@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Swords, Plus, ArrowRight, Play, Users, Trophy, Sparkles, Shield, Zap, Hash, Brain, Activity, Flag, Crosshair, ChevronRight, Share2, Smartphone, HelpCircle, Gamepad2, Flame } from 'lucide-react';
+import { Plus, ArrowRight, Users, Flame, Gamepad2, HelpCircle, Swords, Zap } from 'lucide-react';
 import { GAMES_CATALOG, type GameCategory } from '../config/games';
 import { GameCard } from './GameCard';
 import { soundService } from '../services/sound';
@@ -7,7 +7,7 @@ import type { LocalPlayerProfile } from '../services/player';
 
 interface HomeViewProps {
   profile: LocalPlayerProfile;
-  onCreateRoom: (gameId: string, maxRounds: number) => void;
+  onCreateRoom: (gameId: string, maxRounds: number, withBot?: boolean) => void;
   onJoinRoom: (roomId: string) => void;
   onOpenProfile: () => void;
 }
@@ -28,9 +28,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
     return g.category === selectedCategory;
   });
 
-  const handleCreateDefault = (gameId: string = 'obstaclerush') => {
+  const handleCreateDefault = (gameId: string = 'tankduel') => {
     soundService.playClick();
-    onCreateRoom(gameId, 3);
+    onCreateRoom(gameId, 3, false);
+  };
+
+  const handlePlayVsBot = (gameId: string = 'tankduel') => {
+    soundService.playClick();
+    onCreateRoom(gameId, 3, true);
   };
 
   const handleJoinSubmit = (e: React.FormEvent) => {
@@ -48,7 +53,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     try {
       soundService.playClick();
       const text = await navigator.clipboard.readText();
-      const match = text.match(/(DV-[A-Z0-9]{4}|[A-Z0-9]{6}|[A-Z0-9]{4})/i);
+      const match = text.match(/(DV-[A-Z0-9]{4,6}|[A-Z0-9]{4,6})/i);
       if (match) {
         setRoomCodeInput(match[0].toUpperCase());
       } else {
@@ -60,7 +65,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   };
 
   const categories: { id: GameCategory; label: string; icon: string }[] = [
-    { id: 'all', label: 'All Titles (9)', icon: '🎮' },
+    { id: 'all', label: 'All Titles (10)', icon: '🎮' },
     { id: 'physics', label: 'Physics & Action', icon: '🏃' },
     { id: 'foundational', label: 'Classics', icon: '⚔️' },
     { id: 'reflex', label: 'Reflex Speed', icon: '⚡' },
@@ -70,58 +75,66 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const totalMatches = profile.stats.wins + profile.stats.losses + profile.stats.draws;
 
   return (
-    <div className="w-full max-w-6xl mx-auto px-3 sm:px-6 py-4 flex flex-col items-center">
-      {/* Cinematic Hero Arcade Stage */}
-      <div className="w-full rounded-3xl overflow-hidden relative mb-8 border border-white/15 shadow-2xl bg-slate-950">
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-6 py-2 flex flex-col items-center">
+      {/* Cinematic Hero Stage */}
+      <div className="w-full rounded-3xl overflow-hidden relative mb-6 border border-white/15 shadow-2xl bg-slate-950">
         {/* Background Key Art Image */}
         <div className="absolute inset-0 z-0">
           <img
             src="/assets/hero_banner.jpg"
             alt="DuelVerse Arena"
-            className="w-full h-full object-cover object-center opacity-45 scale-105 filter blur-[1px]"
+            className="w-full h-full object-cover object-center opacity-40 scale-105 filter blur-[0.5px]"
           />
           {/* Deep cyber gradient overlay */}
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0B0F19] via-[#0B0F19]/75 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#0B0F19] via-[#0B0F19]/50 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#070a13] via-[#070a13]/80 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#070a13] via-[#070a13]/60 to-transparent" />
         </div>
 
         {/* Content over Banner */}
         <div className="relative z-10 p-6 sm:p-10 lg:p-12 flex flex-col items-start max-w-2xl">
-          {/* Status Badge */}
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-xs font-black font-mono tracking-wider mb-4 shadow-sm">
+          {/* Live Badge */}
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-xs font-black font-mono tracking-wider mb-3 shadow-sm">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-            <span>INSTANT MULTIPLAYER ARCADE • 9 GAMES LIVE</span>
+            <span>INSTANT MULTIPLAYER ARCADE • 10 GAMES LIVE</span>
           </div>
 
-          <h1 className="text-4xl sm:text-6xl font-black font-['Outfit'] tracking-tight text-white leading-none mb-3 drop-shadow-lg">
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black font-['Outfit'] tracking-tight text-white leading-none mb-3 drop-shadow-lg">
             YOUR FRIENDS.<br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-violet-300 to-white">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-violet-300 to-amber-300">
               YOUR ARENA.
             </span>
           </h1>
 
-          <p className="text-sm sm:text-base text-slate-200 font-medium leading-relaxed mb-6 max-w-lg drop-shadow">
-            9 instant games. One room. Endless rivalries. Scan a QR code or share a 6-character room code to duel your friends in real-time.
+          <p className="text-xs sm:text-sm text-slate-300 font-medium leading-relaxed mb-6 max-w-lg drop-shadow">
+            Zero installs. Zero waiting. Scan a QR code or share a 6-character room code to duel your friends or challenge CyberBot in real time.
           </p>
 
           {/* Action CTAs */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
             <button
-              id="btn-create-room"
-              onClick={() => handleCreateDefault('obstaclerush')}
-              className="btn-primary px-8 py-4 text-base font-black flex items-center justify-center gap-2 shadow-xl shadow-violet-600/30 active:scale-95 transition"
+              id="btn-quick-bot"
+              onClick={() => handlePlayVsBot('tankduel')}
+              className="btn-arcade btn-arcade-cyan px-6 py-3.5 text-base font-black flex items-center justify-center gap-2 shadow-xl shadow-cyan-600/30 active:scale-95 transition"
             >
-              <Plus className="w-5 h-5 stroke-[2.5]" />
-              <span>CREATE BATTLE ROOM</span>
+              <span>🤖 INSTANT VS CYBERBOT</span>
+            </button>
+
+            <button
+              id="btn-create-room"
+              onClick={() => handleCreateDefault('tankduel')}
+              className="btn-arcade btn-arcade-rose px-6 py-3.5 text-base font-black flex items-center justify-center gap-2 shadow-xl shadow-rose-600/30 active:scale-95 transition"
+            >
+              <Plus className="w-5 h-5 stroke-[3]" />
+              <span>HOST 2P ROOM</span>
             </button>
 
             <button
               id="btn-toggle-join"
               onClick={() => setIsJoinExpanded(!isJoinExpanded)}
-              className="btn-secondary px-6 py-4 text-base font-bold flex items-center justify-center gap-2 border-cyan-500/40 text-cyan-300 bg-cyan-950/40 hover:bg-cyan-900/50 backdrop-blur-md active:scale-95 transition"
+              className="px-5 py-3.5 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-white/15 text-white text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition"
             >
-              <Users className="w-5 h-5 text-cyan-400" />
-              <span>ENTER ROOM CODE</span>
+              <Users className="w-4 h-4 text-slate-300" />
+              <span>JOIN CODE</span>
             </button>
           </div>
 
@@ -152,10 +165,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 />
                 <button
                   type="submit"
-                  className="btn-primary btn-cyan px-5 py-2.5 text-sm font-bold flex items-center gap-1.5 shrink-0"
+                  className="btn-arcade btn-arcade-cyan px-5 py-2.5 text-sm font-black flex items-center gap-1.5 shrink-0"
                 >
-                  <span>Enter</span>
-                  <ArrowRight className="w-4 h-4" />
+                  <span>Join</span>
+                  <ArrowRight className="w-4 h-4 stroke-[3]" />
                 </button>
               </div>
               {errorMsg && (
@@ -164,68 +177,51 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </form>
           )}
         </div>
-
-        {/* Live Esports Ticker Bar */}
-        <div className="relative z-10 border-t border-white/10 bg-slate-950/80 backdrop-blur-md px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1.5 text-amber-400 font-bold font-mono">
-              <Flame className="w-3.5 h-3.5 fill-current" />
-              <span>FLAGSHIP: OBSTACLE RUSH</span>
-            </span>
-            <span className="text-slate-600 hidden sm:inline">•</span>
-            <span className="hidden sm:inline text-slate-400 font-mono">SUB-5MS LOW LATENCY</span>
-          </div>
-          <div className="flex items-center gap-3 font-mono text-[11px] text-slate-400">
-            <span className="text-emerald-400 font-bold">● 100% FUNCTIONAL STATE ENGINE</span>
-            <span>•</span>
-            <span>ZERO ADS</span>
-          </div>
-        </div>
       </div>
 
       {/* Profile & Recent Record Bar (If matches played) */}
       {totalMatches > 0 && (
         <div
           onClick={onOpenProfile}
-          className="w-full glass-card p-4 rounded-2xl border border-violet-500/30 mb-8 flex items-center justify-between gap-4 cursor-pointer hover:border-violet-400 transition shadow-lg"
+          className="w-full glass-card p-3 sm:p-4 rounded-2xl border border-violet-500/30 mb-6 flex items-center justify-between gap-4 cursor-pointer hover:border-violet-400 transition shadow-lg"
         >
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-xl bg-violet-600/30 border border-violet-400/50 flex items-center justify-center text-3xl shadow-md shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-violet-600/30 border border-violet-400/50 flex items-center justify-center text-2xl shadow-md shrink-0">
               {profile.avatarId}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-extrabold text-white font-['Outfit'] text-base">
+                <span className="font-black text-white font-['Outfit'] text-base">
                   {profile.nickname}
                 </span>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
                   {totalMatches} Matches Fought
                 </span>
               </div>
-              <div className="flex items-center gap-3 text-xs mt-1">
-                <span className="text-amber-400 font-bold font-mono">{profile.stats.wins} Wins</span>
-                <span className="text-rose-400 font-bold font-mono">{profile.stats.losses} Losses</span>
-                <span className="text-cyan-400 font-bold font-mono">{profile.stats.draws} Draws</span>
+              <div className="flex items-center gap-3 text-xs mt-0.5">
+                <span className="text-amber-400 font-black font-mono">{profile.stats.wins} Wins</span>
+                <span className="text-rose-400 font-black font-mono">{profile.stats.losses} Losses</span>
+                <span className="text-cyan-400 font-black font-mono">{profile.stats.draws} Draws</span>
               </div>
             </div>
           </div>
 
           <button className="btn-secondary py-1.5 px-3 text-xs font-bold">
-            Edit Gamer Persona
+            Edit Gamer
           </button>
         </div>
       )}
 
       {/* Arcade Library Header & Filter Pills */}
       <div className="w-full mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div>
             <h2 className="text-2xl sm:text-3xl font-black font-['Outfit'] text-white tracking-tight flex items-center gap-2">
-              <Gamepad2 className="w-7 h-7 text-violet-400" />
+              <Gamepad2 className="w-6 h-6 text-violet-400" />
               <span>ARCADE GAME LIBRARY</span>
             </h2>
             <p className="text-xs text-slate-400 mt-0.5 font-medium">
-              Click any game capsule below to launch an instant room
+              Pick any title below to launch an instant room
             </p>
           </div>
 
@@ -238,7 +234,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   soundService.playClick();
                   setSelectedCategory(cat.id);
                 }}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold font-['Outfit'] transition flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-black font-['Outfit'] transition flex items-center gap-1.5 ${
                   selectedCategory === cat.id
                     ? 'bg-violet-600 text-white shadow-md shadow-violet-500/40'
                     : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
@@ -251,21 +247,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
         </div>
 
-        {/* 9 Game Capsules Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        {/* 10 Game Capsules Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
           {filteredGames.map((game) => (
             <GameCard
               key={game.id}
               game={game}
               onSelect={(gameId) => handleCreateDefault(gameId)}
+              onPlayVsAi={(gameId) => handlePlayVsBot(gameId)}
             />
           ))}
         </div>
       </div>
 
-      {/* How To Play 3-Step Protocol Guide */}
-      <div className="w-full glass-panel p-6 sm:p-8 rounded-3xl border border-white/10 my-8 shadow-2xl relative overflow-hidden">
-        <div className="text-center max-w-md mx-auto mb-8">
+      {/* 3-Step Protocol Guide */}
+      <div className="w-full glass-panel p-5 sm:p-7 rounded-3xl border border-white/10 my-4 shadow-2xl relative overflow-hidden">
+        <div className="text-center max-w-md mx-auto mb-6">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/10 text-cyan-300 text-xs font-bold font-mono mb-2">
             <HelpCircle className="w-3.5 h-3.5" />
             <span>HOW TO PLAY IN 3 SECONDS</span>
@@ -278,53 +275,53 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <div className="flex flex-col items-center text-center p-5 rounded-2xl bg-slate-900/70 border border-slate-800">
-            <div className="w-12 h-12 rounded-xl bg-violet-500/20 border border-violet-400/40 text-violet-300 font-black text-xl flex items-center justify-center mb-3 font-mono">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="flex flex-col items-center text-center p-4 rounded-2xl bg-slate-900/70 border border-slate-800">
+            <div className="w-11 h-11 rounded-xl bg-violet-500/20 border border-violet-400/40 text-violet-300 font-black text-lg flex items-center justify-center mb-2.5 font-mono">
               1
             </div>
             <h4 className="font-extrabold text-white font-['Outfit'] text-base mb-1">
               Create a Room
             </h4>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Pick a title and generate a 6-character room code (e.g. <span className="font-mono text-violet-300 font-bold">DV-8492</span>).
+              Pick a game and generate an instant 6-character room code.
             </p>
           </div>
 
-          <div className="flex flex-col items-center text-center p-5 rounded-2xl bg-slate-900/70 border border-slate-800">
-            <div className="w-12 h-12 rounded-xl bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 font-black text-xl flex items-center justify-center mb-3 font-mono">
+          <div className="flex flex-col items-center text-center p-4 rounded-2xl bg-slate-900/70 border border-slate-800">
+            <div className="w-11 h-11 rounded-xl bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 font-black text-lg flex items-center justify-center mb-2.5 font-mono">
               2
             </div>
             <h4 className="font-extrabold text-white font-['Outfit'] text-base mb-1">
               Invite Your Rival
             </h4>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Show your phone's screen to scan the QR code or send the link to WhatsApp or iMessage.
+              Show QR code to scan or share link via WhatsApp or iMessage.
             </p>
           </div>
 
-          <div className="flex flex-col items-center text-center p-5 rounded-2xl bg-slate-900/70 border border-slate-800">
-            <div className="w-12 h-12 rounded-xl bg-amber-500/20 border border-amber-400/40 text-amber-300 font-black text-xl flex items-center justify-center mb-3 font-mono">
+          <div className="flex flex-col items-center text-center p-4 rounded-2xl bg-slate-900/70 border border-slate-800">
+            <div className="w-11 h-11 rounded-xl bg-amber-500/20 border border-amber-400/40 text-amber-300 font-black text-lg flex items-center justify-center mb-2.5 font-mono">
               3
             </div>
             <h4 className="font-extrabold text-white font-['Outfit'] text-base mb-1">
               Duel in Real Time
             </h4>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Compete with live scoreboards, 1-click rematch votes, and switch games without leaving!
+              Sub-5ms low latency with live scores and 1-tap rematches.
             </p>
           </div>
         </div>
       </div>
 
       {/* Cyber Gaming Footer */}
-      <footer className="w-full border-t border-white/10 pt-6 pb-6 text-center text-xs text-slate-500 flex flex-col items-center gap-2">
+      <footer className="w-full border-t border-white/10 pt-5 pb-5 text-center text-xs text-slate-500 flex flex-col items-center gap-1.5">
         <div className="flex items-center gap-2 font-black font-['Outfit'] text-slate-400 text-sm">
           <Swords className="w-4 h-4 text-violet-400" />
           <span>DUELVERSE • ZERO-INSTALL MOBILE MULTIPLAYER ARCADE</span>
         </div>
         <p className="text-[11px] text-slate-600 max-w-sm">
-          Engineered with authoritative state synchronization, Web Audio API synthesis, and sub-5ms low latency transport.
+          Powered by authoritative state synchronization and Web Audio API synthesis.
         </p>
       </footer>
     </div>

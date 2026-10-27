@@ -41,8 +41,15 @@ class SoundEngine {
     this.volume = Math.max(0, Math.min(1, vol));
   }
 
-  // Play a procedural synthesized tone
-  private playTone(freq: number, type: OscillatorType, duration: number, gainPeak: number = 0.2, delay: number = 0) {
+  // Play a procedural synthesized tone with organic pitch variation
+  private playTone(
+    freq: number,
+    type: OscillatorType,
+    duration: number,
+    gainPeak: number = 0.2,
+    delay: number = 0,
+    pitchVary: boolean = true
+  ) {
     if (this.isMuted) return;
     try {
       this.initCtx();
@@ -52,11 +59,12 @@ class SoundEngine {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
 
+      const pitchFactor = pitchVary ? (0.95 + Math.random() * 0.1) : 1.0;
       osc.type = type;
-      osc.frequency.setValueAtTime(freq, now);
+      osc.frequency.setValueAtTime(freq * pitchFactor, now);
 
       gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(gainPeak * this.volume, now + 0.01);
+      gain.gain.linearRampToValueAtTime(gainPeak * this.volume, now + 0.008);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
       osc.connect(gain);
@@ -65,19 +73,34 @@ class SoundEngine {
       osc.start(now);
       osc.stop(now + duration);
     } catch {
-      // AudioContext could be blocked by browser policy prior to interaction
+      // AudioContext policy catch
     }
   }
 
   // Tactile button click
   public playClick() {
-    this.playTone(800, 'sine', 0.05, 0.15);
+    this.playTone(800, 'sine', 0.04, 0.15, 0, false);
     this.triggerHaptic(12);
+  }
+
+  // Physical puck / wall / mallet collision with velocity-scaled frequency and pitch variation
+  public playImpact(intensity: number = 1.0) {
+    const baseFreq = 220 + Math.min(400, intensity * 150);
+    this.playTone(baseFreq, 'triangle', 0.08, Math.min(0.35, 0.15 * intensity), 0, true);
+    this.triggerHaptic(Math.min(35, Math.floor(10 + intensity * 15)));
+  }
+
+  // Explosive Goal / Win Fanfare Impact
+  public playGoal() {
+    this.playTone(180, 'sine', 0.4, 0.4, 0, false);
+    this.playTone(520, 'triangle', 0.25, 0.35, 0.05, true);
+    this.playTone(880, 'sine', 0.35, 0.3, 0.12, true);
+    this.triggerHaptic([40, 30, 80]);
   }
 
   // Card flip / Disc drop move sound
   public playMove() {
-    this.playTone(440, 'triangle', 0.1, 0.25);
+    this.playTone(440, 'triangle', 0.1, 0.25, 0, true);
     this.triggerHaptic(18);
   }
 

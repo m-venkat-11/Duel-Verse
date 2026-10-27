@@ -141,6 +141,20 @@ export const GAMES_CATALOG: GameMetadata[] = [
     description: 'Pop gold tokens and diamond sparks as they spawn across the arena. Dodge skull traps that freeze controls!',
     featured: false,
     playable: true
+  },
+  {
+    id: 'tankduel',
+    title: 'Tank Duel',
+    tagline: 'Ricochet laser tank arena battle',
+    category: 'physics',
+    playersRange: '1v1 • Realtime',
+    estDurationSec: 90,
+    difficulty: 'Intense',
+    accentColor: '#10B981',
+    accentGradient: 'from-emerald-500 via-teal-600 to-cyan-600',
+    description: 'Steer your armored tank, take cover behind barricades, and fire bouncing plasma shells to eliminate your rival!',
+    featured: true,
+    playable: true
   }
 ];
 

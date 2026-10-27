@@ -91,3 +91,52 @@ export function processTicTacToeMove(
 
   return { newState, roundOver: false, winnerUid: null, isDraw: false };
 }
+
+export function getBestTicTacToeMove(
+  board: (string | null)[],
+  botUid: string,
+  humanUid: string
+): number {
+  // Check 1-move win for Bot
+  for (let i = 0; i < 9; i++) {
+    if (board[i] === null) {
+      board[i] = botUid;
+      const { winnerUid } = processTicTacToeMove(
+        { board, currentTurn: botUid, symbols: { [botUid]: 'O', [humanUid]: 'X' }, winningLine: null, isDraw: false },
+        i,
+        botUid,
+        [botUid, humanUid]
+      );
+      board[i] = null;
+      if (winnerUid === botUid) return i;
+    }
+  }
+
+  // Check 1-move block for Human
+  for (let i = 0; i < 9; i++) {
+    if (board[i] === null) {
+      board[i] = humanUid;
+      const { winnerUid } = processTicTacToeMove(
+        { board, currentTurn: humanUid, symbols: { [botUid]: 'O', [humanUid]: 'X' }, winningLine: null, isDraw: false },
+        i,
+        humanUid,
+        [humanUid, botUid]
+      );
+      board[i] = null;
+      if (winnerUid === humanUid) return i;
+    }
+  }
+
+  // Center preference
+  if (board[4] === null) return 4;
+
+  // Corners
+  const corners = [0, 2, 6, 8].filter((c) => board[c] === null);
+  if (corners.length > 0) {
+    return corners[Math.floor(Math.random() * corners.length)];
+  }
+
+  // Remaining open
+  const open = board.map((v, idx) => (v === null ? idx : -1)).filter((idx) => idx !== -1);
+  return open[0] ?? 0;
+}
