@@ -114,6 +114,40 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
       spinners[p2Uid].alive = true;
     };
 
+    const touchDrag = { active: false, startX: 0, startY: 0, currX: 0, currY: 0 };
+
+    const handleCanvasPointerDown = (e: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = W / rect.width;
+      const scaleY = H / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+
+      touchDrag.active = true;
+      touchDrag.startX = px;
+      touchDrag.startY = py;
+      touchDrag.currX = px;
+      touchDrag.currY = py;
+    };
+
+    const handleCanvasPointerMove = (e: PointerEvent) => {
+      if (!touchDrag.active) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = W / rect.width;
+      const scaleY = H / rect.height;
+      touchDrag.currX = (e.clientX - rect.left) * scaleX;
+      touchDrag.currY = (e.clientY - rect.top) * scaleY;
+    };
+
+    const handleCanvasPointerUp = () => {
+      touchDrag.active = false;
+    };
+
+    canvas.addEventListener('pointerdown', handleCanvasPointerDown);
+    window.addEventListener('pointermove', handleCanvasPointerMove);
+    window.addEventListener('pointerup', handleCanvasPointerUp);
+    window.addEventListener('pointercancel', handleCanvasPointerUp);
+
     const update = (dt: number) => {
       juice.update(dt);
 
@@ -125,7 +159,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
         return;
       }
 
-      // 1. My Spinner Steering Controls
+      // 1. My Spinner Steering Controls (Direct 1-Finger Touch Drag + Keyboard)
       const mySpin = spinners[playerUid];
       if (mySpin && mySpin.alive) {
         mySpin.boostCooldown = Math.max(0, mySpin.boostCooldown - dt);
@@ -133,28 +167,45 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
 
         let steerX = 0;
         let steerY = 0;
-        const speed = 4.2;
 
-        if (keysDown.current['a'] || keysDown.current['arrowleft'] || mobileInput.current.left) steerX -= speed;
-        if (keysDown.current['d'] || keysDown.current['arrowright'] || mobileInput.current.right) steerX += speed;
-        if (keysDown.current['w'] || keysDown.current['arrowup'] || mobileInput.current.up) steerY -= speed;
-        if (keysDown.current['s'] || keysDown.current['arrowdown'] || mobileInput.current.down) steerY += speed;
-
-        // Boost pulse
-        const isBoost = (keysDown.current[' '] || mobileInput.current.boost) && mySpin.boostCooldown === 0;
-        if (isBoost) {
-          mySpin.boostCooldown = 2.2;
-          mobileInput.current.boost = false;
-          mySpin.vx += steerX * 3.2;
-          mySpin.vy += steerY * 3.2;
-          juice.addTrauma(0.2);
-          soundService.playSignalAlert?.();
-        } else {
-          mySpin.vx += steerX * 0.25;
-          mySpin.vy += steerY * 0.25;
+        // Touch drag vector
+        if (touchDrag.active) {
+          const tdx = touchDrag.currX - touchDrag.startX;
+          const tdy = touchDrag.currY - touchDrag.startY;
+          const tdist = Math.hypot(tdx, tdy);
+          if (tdist > 8) {
+            const maxDrag = 65;
+            const factor = Math.min(1.0, tdist / maxDrag);
+            steerX = (tdx / tdist) * 5.2 * factor;
+            steerY = (tdy / tdist) * 5.2 * factor;
+          }
         }
 
-        // Apply friction
+        // Keyboard steering fallback
+        const speed = 4.8;
+        if (keysDown.current['a'] || keysDown.current['arrowleft']) steerX -= speed;
+        if (keysDown.current['d'] || keysDown.current['arrowright']) steerX += speed;
+        if (keysDown.current['w'] || keysDown.current['arrowup']) steerY -= speed;
+        if (keysDown.current['s'] || keysDown.current['arrowdown']) steerY += speed;
+
+        // Boost trigger
+        const isBoost = (keysDown.current[' '] || mobileInput.current.boost) && mySpin.boostCooldown === 0;
+        if (isBoost) {
+          mySpin.boostCooldown = 2.0;
+          mobileInput.current.boost = false;
+          // Apply instant heavy forward dash
+          const dashMag = Math.hypot(steerX, steerY) || 1;
+          mySpin.vx += (steerX / dashMag) * 14;
+          mySpin.vy += (steerY / dashMag) * 14;
+          juice.addTrauma(0.35);
+          juice.playSound('shoot');
+          juice.emitSparks(mySpin.x, mySpin.y, 16, '#f59e0b', '#fbbf24', 5);
+        } else {
+          mySpin.vx += steerX * 0.35;
+          mySpin.vy += steerY * 0.35;
+        }
+
+        // Low ice friction for spinning drift
         mySpin.vx *= 0.94;
         mySpin.vy *= 0.94;
 
@@ -163,7 +214,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
         mySpin.angle += mySpin.spinRpm * dt;
       }
 
-      // 2. CyberBot AI Steering
+      // 2. CyberBot AI Steering (Aggressive Pursuer with Edge Awareness)
       if (isHost && isBotPlaying) {
         const botSpin = spinners[p2Uid];
         const humanSpin = spinners[p1Uid];
@@ -171,31 +222,30 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
         if (botSpin && botSpin.alive && humanSpin && humanSpin.alive) {
           botSpin.boostCooldown = Math.max(0, botSpin.boostCooldown - dt);
 
-          // Vector to human spinner
           const dx = humanSpin.x - botSpin.x;
           const dy = humanSpin.y - botSpin.y;
           const dist = Math.hypot(dx, dy);
 
-          // Vector from arena center
           const distFromCenter = Math.hypot(botSpin.x - ARENA_CX, botSpin.y - ARENA_CY);
 
-          let steerX = (dx / (dist || 1)) * 3.8;
-          let steerY = (dy / (dist || 1)) * 3.8;
+          let steerX = (dx / (dist || 1)) * 4.4;
+          let steerY = (dy / (dist || 1)) * 4.4;
 
           // If close to edge, steer back toward center!
           if (distFromCenter > ARENA_R - 35) {
-            steerX = ((ARENA_CX - botSpin.x) / distFromCenter) * 4.5;
-            steerY = ((ARENA_CY - botSpin.y) / distFromCenter) * 4.5;
+            steerX = ((ARENA_CX - botSpin.x) / distFromCenter) * 5.0;
+            steerY = ((ARENA_CY - botSpin.y) / distFromCenter) * 5.0;
           }
 
-          // Bot boost attack if lined up
-          if (dist < 120 && botSpin.boostCooldown === 0 && Math.random() < 0.2) {
-            botSpin.boostCooldown = 2.2;
-            botSpin.vx += steerX * 3.0;
-            botSpin.vy += steerY * 3.0;
+          // Bot boost attack if lined up with human
+          if (dist < 130 && botSpin.boostCooldown === 0 && Math.random() < 0.25) {
+            botSpin.boostCooldown = 2.0;
+            botSpin.vx += (dx / (dist || 1)) * 13;
+            botSpin.vy += (dy / (dist || 1)) * 13;
+            juice.playSound('shoot');
           } else {
-            botSpin.vx += steerX * 0.22;
-            botSpin.vy += steerY * 0.22;
+            botSpin.vx += steerX * 0.32;
+            botSpin.vy += steerY * 0.32;
           }
 
           botSpin.vx *= 0.94;
@@ -207,7 +257,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
         }
       }
 
-      // 3. Spinner-on-Spinner Physics Impulse Collisions
+      // 3. Rigid Body Impulse Clash (Restitution e = 0.90 + Tangential Sparks)
       const s1 = spinners[p1Uid];
       const s2 = spinners[p2Uid];
 
@@ -215,28 +265,41 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
         const cdx = s2.x - s1.x;
         const cdy = s2.y - s1.y;
         const cdist = Math.hypot(cdx, cdy);
+        const minDist = SPINNER_R * 2;
 
-        if (cdist < SPINNER_R * 2) {
-          // Collision overlap resolution & impulse
-          const overlap = SPINNER_R * 2 - cdist;
+        if (cdist < minDist && cdist > 0.001) {
           const nx = cdx / cdist;
           const ny = cdy / cdist;
 
-          s1.x -= nx * (overlap / 2);
-          s1.y -= ny * (overlap / 2);
-          s2.x += nx * (overlap / 2);
-          s2.y += ny * (overlap / 2);
+          const kx = s1.vx - s2.vx;
+          const ky = s1.vy - s2.vy;
+          const m1 = 1.0;
+          const m2 = 1.0;
+          const p = (2 * (nx * kx + ny * ky)) / (m1 + m2);
+          const e = 0.90; // High elastic bounce
 
-          // Elastic impulse bounce
-          const impulse = 8.5;
-          s1.vx -= nx * impulse;
-          s1.vy -= ny * impulse;
-          s2.vx += nx * impulse;
-          s2.vy += ny * impulse;
+          s1.vx -= p * m2 * nx * (1 + e);
+          s1.vy -= p * m2 * ny * (1 + e);
+          s2.vx += p * m1 * nx * (1 + e);
+          s2.vy += p * m1 * ny * (1 + e);
 
-          juice.addTrauma(0.35);
-          juice.emitSparks((s1.x + s2.x) / 2, (s1.y + s2.y) / 2, 20, '#fbbf24', '#06b6d4', 4);
-          soundService.playImpact(1.6);
+          // Resolve overlap
+          const overlap = 0.5 * (minDist - cdist);
+          s1.x -= nx * overlap;
+          s1.y -= ny * overlap;
+          s2.x += nx * overlap;
+          s2.y += ny * overlap;
+
+          // Exchange rotational RPM
+          const tempRpm = s1.spinRpm;
+          s1.spinRpm = -s2.spinRpm * 0.95;
+          s2.spinRpm = -tempRpm * 0.95;
+
+          const impactSpeed = Math.hypot(kx, ky);
+          juice.addTrauma(Math.min(0.55, 0.2 + impactSpeed * 0.04));
+          juice.triggerHitStop(40);
+          juice.playSound('spark');
+          juice.emitSparks((s1.x + s2.x) / 2, (s1.y + s2.y) / 2, 22, '#fbbf24', '#06b6d4', 6);
         }
       }
 
@@ -412,40 +475,17 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
         <canvas ref={canvasRef} className="w-full h-full block" />
       </div>
 
-      {/* Mobile Steering D-pad & Boost Button */}
+      {/* Mobile Touch-Drag Control Bar & Slam Boost */}
       <div className="w-full grid grid-cols-2 gap-3 max-w-md pt-1">
-        {/* Steering Cross */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-900/80 rounded-2xl border border-slate-700/60">
-          <div />
-          <button
-            onPointerDown={() => { mobileInput.current.up = true; }}
-            onPointerUp={() => { mobileInput.current.up = false; }}
-            className="h-11 rounded-xl bg-slate-800 flex items-center justify-center active:bg-slate-700"
-          >
-            <ArrowUp className="w-5 h-5 text-slate-300" />
-          </button>
-          <div />
-          <button
-            onPointerDown={() => { mobileInput.current.left = true; }}
-            onPointerUp={() => { mobileInput.current.left = false; }}
-            className="h-11 rounded-xl bg-slate-800 flex items-center justify-center active:bg-slate-700"
-          >
-            <ArrowLeft className="w-5 h-5 text-slate-300" />
-          </button>
-          <button
-            onPointerDown={() => { mobileInput.current.down = true; }}
-            onPointerUp={() => { mobileInput.current.down = false; }}
-            className="h-11 rounded-xl bg-slate-800 flex items-center justify-center active:bg-slate-700"
-          >
-            <ArrowDown className="w-5 h-5 text-slate-300" />
-          </button>
-          <button
-            onPointerDown={() => { mobileInput.current.right = true; }}
-            onPointerUp={() => { mobileInput.current.right = false; }}
-            className="h-11 rounded-xl bg-slate-800 flex items-center justify-center active:bg-slate-700"
-          >
-            <ArrowRight className="w-5 h-5 text-slate-300" />
-          </button>
+        {/* Touch-Drag Guidance Card */}
+        <div className="flex flex-col justify-center p-3 bg-slate-900/90 rounded-2xl border border-violet-500/40 shadow-lg text-left">
+          <span className="text-xs font-black font-['Outfit'] text-violet-300 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-violet-400 animate-ping" />
+            1-FINGER TOUCH DRAG
+          </span>
+          <span className="text-[10px] text-slate-400 font-mono mt-1">
+            Drag on arena to steer & push rival over the glowing edge!
+          </span>
         </div>
 
         {/* Slam Boost Trigger */}
@@ -453,20 +493,20 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
           <button
             onClick={() => { mobileInput.current.boost = true; }}
             disabled={!boostReady}
-            className={`w-full h-full min-h-[90px] rounded-2xl font-black font-['Outfit'] text-lg flex flex-col items-center justify-center gap-1 shadow-2xl active:scale-95 transition border-2 ${
+            className={`w-full h-16 rounded-2xl font-black font-['Outfit'] text-base flex items-center justify-center gap-2 shadow-2xl active:scale-95 transition border-2 ${
               boostReady
                 ? 'bg-gradient-to-r from-amber-500 to-rose-500 border-amber-300 text-slate-950 shadow-amber-500/30'
                 : 'bg-slate-800 border-slate-700 text-slate-500 opacity-60'
             }`}
           >
-            <Zap className="w-6 h-6 fill-current animate-pulse" />
-            <span>{boostReady ? 'SLAM BOOST!' : 'RECHARGING...'}</span>
+            <Zap className="w-5 h-5 fill-current animate-pulse" />
+            <span>{boostReady ? 'SLAM DASH!' : 'CHARGING...'}</span>
           </button>
         </div>
       </div>
 
       <p className="text-xs text-slate-400 font-mono text-center">
-        ⌨️ Desktop: WASD / Arrow Keys to steer • Spacebar for Slam Boost!
+        ⚡ Touch & drag on canvas to steer • Spacebar / Tap for Slam Dash!
       </p>
     </div>
   );

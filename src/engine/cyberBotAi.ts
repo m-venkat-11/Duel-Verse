@@ -67,7 +67,8 @@ export function getCyberBotTicTacToeMove(
   board: (string | null)[],
   botUid: string,
   humanUid: string,
-  difficulty: BotDifficulty = 'pro'
+  difficulty: BotDifficulty = 'pro',
+  history?: Record<string, number[]>
 ): number {
   const openIndices = board
     .map((val, idx) => (val === null ? idx : -1))
@@ -84,43 +85,34 @@ export function getCyberBotTicTacToeMove(
     return openIndices[Math.floor(Math.random() * openIndices.length)];
   }
 
-  // Check 1-move win for Bot
+  const botHist = [...(history?.[botUid] || [])];
+  const humanHist = [...(history?.[humanUid] || [])];
+
+  // Check 1-move win for Bot (accounting for FIFO removal)
   for (const idx of openIndices) {
-    board[idx] = botUid;
-    if (checkTTTWinner(board) === botUid) {
-      board[idx] = null;
+    const testBoard = [...board];
+    if (botHist.length >= 3) {
+      testBoard[botHist[0]] = null;
+    }
+    testBoard[idx] = botUid;
+    if (checkTTTWinner(testBoard) === botUid) {
       return idx;
     }
-    board[idx] = null;
   }
 
-  // Check 1-move block for Human
+  // Check 1-move block for Human (accounting for FIFO removal)
   for (const idx of openIndices) {
-    board[idx] = humanUid;
-    if (checkTTTWinner(board) === humanUid) {
-      board[idx] = null;
+    const testBoard = [...board];
+    if (humanHist.length >= 3) {
+      testBoard[humanHist[0]] = null;
+    }
+    testBoard[idx] = humanUid;
+    if (checkTTTWinner(testBoard) === humanUid) {
       return idx;
     }
-    board[idx] = null;
   }
 
-  // Master: Full Minimax (Unbeatable)
-  if (difficulty === 'master') {
-    let bestScore = -Infinity;
-    let bestMove = openIndices[0];
-    for (const idx of openIndices) {
-      board[idx] = botUid;
-      const score = minimaxTTT(board, 0, false, botUid, humanUid);
-      board[idx] = null;
-      if (score > bestScore) {
-        bestScore = score;
-        bestMove = idx;
-      }
-    }
-    return bestMove;
-  }
-
-  // Pro: Center -> Corners -> Edges
+  // Pro & Master: Center -> Corners -> Edges
   if (board[4] === null) return 4;
   const corners = [0, 2, 6, 8].filter((c) => board[c] === null);
   if (corners.length > 0) {

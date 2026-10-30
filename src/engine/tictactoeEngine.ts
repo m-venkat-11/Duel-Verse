@@ -18,7 +18,11 @@ export function createTicTacToeInitialState(playerUids: string[]): TicTacToeStat
       [p2]: 'O'
     },
     winningLine: null,
-    isDraw: false
+    isDraw: false,
+    history: {
+      [p1]: [],
+      [p2]: []
+    }
   };
 }
 
@@ -34,8 +38,8 @@ export function processTicTacToeMove(
   isDraw: boolean;
 } {
   // Authoritative validation
-  if (state.winningLine !== null || state.isDraw) {
-    return { newState: state, roundOver: true, winnerUid: null, isDraw: state.isDraw };
+  if (state.winningLine !== null) {
+    return { newState: state, roundOver: true, winnerUid: null, isDraw: false };
   }
   if (state.currentTurn !== playerUid) {
     return { newState: state, roundOver: false, winnerUid: null, isDraw: false };
@@ -45,7 +49,22 @@ export function processTicTacToeMove(
   }
 
   const nextBoard = [...state.board];
+  const pHistory = [...(state.history?.[playerUid] || [])];
+
+  // Infinite 3-Piece FIFO: If player already has 3 pieces, remove oldest mark!
+  if (pHistory.length >= 3) {
+    const oldestCell = pHistory.shift()!;
+    nextBoard[oldestCell] = null;
+  }
+
+  // Place new piece
+  pHistory.push(cellIndex);
   nextBoard[cellIndex] = playerUid;
+
+  const nextHistory = {
+    ...(state.history || {}),
+    [playerUid]: pHistory
+  };
 
   // Check winning lines
   let winningLine: number[] | null = null;
@@ -62,21 +81,10 @@ export function processTicTacToeMove(
       ...state,
       board: nextBoard,
       winningLine,
-      isDraw: false
+      isDraw: false,
+      history: nextHistory
     };
     return { newState, roundOver: true, winnerUid: playerUid, isDraw: false };
-  }
-
-  // Check draw (all cells filled)
-  const isDraw = nextBoard.every((c) => c !== null);
-  if (isDraw) {
-    const newState: TicTacToeState = {
-      ...state,
-      board: nextBoard,
-      winningLine: null,
-      isDraw: true
-    };
-    return { newState, roundOver: true, winnerUid: null, isDraw: true };
   }
 
   // Switch turn to other player
@@ -86,7 +94,8 @@ export function processTicTacToeMove(
     board: nextBoard,
     currentTurn: nextTurn,
     winningLine: null,
-    isDraw: false
+    isDraw: false,
+    history: nextHistory
   };
 
   return { newState, roundOver: false, winnerUid: null, isDraw: false };
@@ -95,48 +104,57 @@ export function processTicTacToeMove(
 export function getBestTicTacToeMove(
   board: (string | null)[],
   botUid: string,
-  humanUid: string
+  humanUid: string,
+  history?: Record<string, number[]>
 ): number {
-  // Check 1-move win for Bot
-  for (let i = 0; i < 9; i++) {
-    if (board[i] === null) {
-      board[i] = botUid;
-      const { winnerUid } = processTicTacToeMove(
-        { board, currentTurn: botUid, symbols: { [botUid]: 'O', [humanUid]: 'X' }, winningLine: null, isDraw: false },
-        i,
-        botUid,
-        [botUid, humanUid]
-      );
-      board[i] = null;
-      if (winnerUid === botUid) return i;
+  const currentBoard = [...board];
+  const botHist = [...(history?.[botUid] || [])];
+  const humanHist = [...(history?.[humanUid] || [])];
+
+  const openIndices = currentBoard
+    .map((val, idx) => (val === null ? idx : -1))
+    .filter((idx) => idx !== -1);
+
+  if (openIndices.length === 0) return 0;
+
+  // Check 1-move win for Bot simulating FIFO
+  for (const idx of openIndices) {
+    const testBoard = [...currentBoard];
+    if (botHist.length >= 3) {
+      testBoard[botHist[0]] = null;
+    }
+    testBoard[idx] = botUid;
+
+    for (const [a, b, c] of WINNING_LINES) {
+      if (testBoard[a] === botUid && testBoard[b] === botUid && testBoard[c] === botUid) {
+        return idx;
+      }
     }
   }
 
-  // Check 1-move block for Human
-  for (let i = 0; i < 9; i++) {
-    if (board[i] === null) {
-      board[i] = humanUid;
-      const { winnerUid } = processTicTacToeMove(
-        { board, currentTurn: humanUid, symbols: { [botUid]: 'O', [humanUid]: 'X' }, winningLine: null, isDraw: false },
-        i,
-        humanUid,
-        [humanUid, botUid]
-      );
-      board[i] = null;
-      if (winnerUid === humanUid) return i;
+  // Check 1-move block for Human simulating FIFO
+  for (const idx of openIndices) {
+    const testBoard = [...currentBoard];
+    if (humanHist.length >= 3) {
+      testBoard[humanHist[0]] = null;
+    }
+    testBoard[idx] = humanUid;
+
+    for (const [a, b, c] of WINNING_LINES) {
+      if (testBoard[a] === humanUid && testBoard[b] === humanUid && testBoard[c] === humanUid) {
+        return idx;
+      }
     }
   }
 
   // Center preference
-  if (board[4] === null) return 4;
+  if (currentBoard[4] === null) return 4;
 
   // Corners
-  const corners = [0, 2, 6, 8].filter((c) => board[c] === null);
+  const corners = [0, 2, 6, 8].filter((c) => currentBoard[c] === null);
   if (corners.length > 0) {
     return corners[Math.floor(Math.random() * corners.length)];
   }
 
-  // Remaining open
-  const open = board.map((v, idx) => (v === null ? idx : -1)).filter((idx) => idx !== -1);
-  return open[0] ?? 0;
+  return openIndices[Math.floor(Math.random() * openIndices.length)];
 }

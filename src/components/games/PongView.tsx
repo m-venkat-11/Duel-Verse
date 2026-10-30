@@ -72,11 +72,17 @@ export const PongView: React.FC<PongViewProps> = ({
     const input = new InputManager();
     input.attach(canvas);
 
-    // Direct pointer tracking (no click-down required on desktop!)
+    // Direct 2D pointer tracking (move anywhere across your defensive half!)
     const handleDirectPointer = (e: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
-      const rawPercent = ((e.clientX - rect.left) / rect.width) * 100;
-      pointerXPercentRef.current = Math.max(14, Math.min(86, rawPercent));
+      const rawX = ((e.clientX - rect.left) / rect.width) * 100;
+      const rawY = ((e.clientY - rect.top) / rect.height) * 100;
+      pointerXPercentRef.current = Math.max(12, Math.min(88, rawX));
+      // Store 2D target
+      (window as any).__pongTarget = {
+        x: Math.max(12, Math.min(88, rawX)),
+        y: Math.max(53, Math.min(92, rawY))
+      };
     };
 
     canvas.addEventListener('pointermove', handleDirectPointer);
@@ -90,7 +96,7 @@ export const PongView: React.FC<PongViewProps> = ({
     }
     let trailIdx = 0;
 
-    // Local physics simulation state
+    // Local physics simulation state (full 2D striker positions)
     const sim = {
       puckX: 50,
       puckY: 50,
@@ -100,12 +106,12 @@ export const PongView: React.FC<PongViewProps> = ({
       vy: 0.45,
       speed: 1.0,
       paddles: {
-        [bottomUid]: 50,
-        [topUid]: 50
+        [bottomUid]: { x: 50, y: 86, vx: 0, vy: 0 },
+        [topUid]: { x: 50, y: 14, vx: 0, vy: 0 }
       },
       prevPaddles: {
-        [bottomUid]: 50,
-        [topUid]: 50
+        [bottomUid]: { x: 50, y: 86 },
+        [topUid]: { x: 50, y: 14 }
       },
       isGoalScored: false,
       goalPauseTimer: 0,
@@ -224,8 +230,8 @@ export const PongView: React.FC<PongViewProps> = ({
       // Save previous coordinates for visual interpolation
       sim.prevPuckX = sim.puckX;
       sim.prevPuckY = sim.puckY;
-      sim.prevPaddles[bottomUid] = sim.paddles[bottomUid];
-      sim.prevPaddles[topUid] = sim.paddles[topUid];
+      sim.prevPaddles[bottomUid] = { ...sim.paddles[bottomUid] };
+      sim.prevPaddles[topUid] = { ...sim.paddles[topUid] };
 
       // 1. Goal Pause Countdown
       if (sim.isGoalScored) {
@@ -244,60 +250,62 @@ export const PongView: React.FC<PongViewProps> = ({
 
       if (juice.isHitStopped()) return;
 
-      // 2. Local Player Mallet Control (Instant Pointer Hover + Keyboard + Touch Steering)
+      // 2. Local Player Mallet Control (Full 2D Defensive Half Touch Drag)
       const myUid = isBottomPlayer ? bottomUid : topUid;
-      let targetPercent = sim.paddles[myUid];
+      const cur = sim.paddles[myUid];
 
-      if (pointerXPercentRef.current !== null) {
-        targetPercent = pointerXPercentRef.current;
+      let targetX = cur.x;
+      let targetY = cur.y;
+
+      const target2D = (window as any).__pongTarget;
+      if (target2D) {
+        targetX = target2D.x;
+        targetY = target2D.y;
       }
 
       const isKeyLeft = keysDown.current['a'] || keysDown.current['arrowleft'] || mobileSteer.current.left;
       const isKeyRight = keysDown.current['d'] || keysDown.current['arrowright'] || mobileSteer.current.right;
 
-      if (isKeyLeft) {
-        targetPercent = Math.max(14, sim.paddles[myUid] - 4.5);
-        pointerXPercentRef.current = targetPercent;
-      } else if (isKeyRight) {
-        targetPercent = Math.min(86, sim.paddles[myUid] + 4.5);
-        pointerXPercentRef.current = targetPercent;
-      }
+      if (isKeyLeft) targetX = Math.max(12, cur.x - 3.5);
+      if (isKeyRight) targetX = Math.min(88, cur.x + 3.5);
 
-      // Snappy, agile mallet movement
-      sim.paddles[myUid] += (targetPercent - sim.paddles[myUid]) * 0.65;
+      const prevX = cur.x;
+      const prevY = cur.y;
+      cur.x += (targetX - cur.x) * 0.75;
+      cur.y += (targetY - cur.y) * 0.75;
+      cur.vx = cur.x - prevX;
+      cur.vy = cur.y - prevY;
 
       // Throttle network dispatch to 30ms
       const now = Date.now();
       if (now - sim.lastPaddleDispatchTime > 30) {
         sim.lastPaddleDispatchTime = now;
-        onDispatchAction('PONG_PADDLE', { xPos: sim.paddles[myUid] });
+        onDispatchAction('PONG_PADDLE', { xPos: cur.x, yPos: cur.y });
       }
 
-      // 3. CyberBot Air Hockey AI (Smart Defensive & Striking Behavior)
+      // 3. CyberBot Air Hockey AI (Aggressive 2D Striker & Goal Defender)
       if (isHost && isBotPlaying) {
         const botUid = topUid;
-        const currentBotX = sim.paddles[botUid];
+        const botPaddle = sim.paddles[botUid];
         let targetBotX = 50;
+        let targetBotY = 16;
 
-        // If puck is on bot's half, track puck aggressively with predictive angle aiming
-        if (sim.puckY <= 58) {
-          // Track puck trajectory with slight lead
-          const lead = sim.vy < 0 ? sim.vx * 6 : 0;
-          targetBotX = Math.max(14, Math.min(86, sim.puckX + lead));
+        if (sim.puckY <= 52) {
+          // Puck is on bot's half: strike puck downward!
+          targetBotX = Math.max(12, Math.min(88, sim.puckX));
+          targetBotY = Math.max(10, Math.min(44, sim.puckY - 6));
         } else {
-          // Puck is on player's side: bot holds strategic position favoring puck's x
-          targetBotX = 50 + (sim.puckX - 50) * 0.35;
+          // Puck is on player's side: bot guards center goal
+          targetBotX = 50 + (sim.puckX - 50) * 0.45;
+          targetBotY = 16;
         }
 
-        // Smooth high-tier agile tracking (responsive esports-tier AI)
-        const diff = targetBotX - currentBotX;
-        const maxStep = 2.8; // High-tier competitive speed
-        sim.paddles[botUid] += Math.max(-maxStep, Math.min(maxStep, diff * 0.45));
-        sim.paddles[botUid] = Math.max(14, Math.min(86, sim.paddles[botUid]));
-      } else if (!isBottomPlayer && stateRef.current.paddles[bottomUid] !== undefined) {
-        sim.paddles[bottomUid] += (stateRef.current.paddles[bottomUid] - sim.paddles[bottomUid]) * 0.4;
-      } else if (isBottomPlayer && stateRef.current.paddles[topUid] !== undefined) {
-        sim.paddles[topUid] += (stateRef.current.paddles[topUid] - sim.paddles[topUid]) * 0.4;
+        const prevBotX = botPaddle.x;
+        const prevBotY = botPaddle.y;
+        botPaddle.x += (targetBotX - botPaddle.x) * 0.42;
+        botPaddle.y += (targetBotY - botPaddle.y) * 0.42;
+        botPaddle.vx = botPaddle.x - prevBotX;
+        botPaddle.vy = botPaddle.y - prevBotY;
       }
 
       // 4. Host Physics Simulation with Continuous Swept Sub-stepping
@@ -315,44 +323,72 @@ export const PongView: React.FC<PongViewProps> = ({
             sim.puckX = 4;
             sim.vx = Math.abs(sim.vx);
             juice.addTrauma(0.12);
+            juice.playSound('ricochet');
             juice.emitSparks((sim.puckX / 100) * W, (sim.puckY / 100) * H, 8, '#06b6d4', '#22d3ee', 3);
-            soundService.playImpact(0.8);
           } else if (sim.puckX >= 96) {
             sim.puckX = 96;
             sim.vx = -Math.abs(sim.vx);
             juice.addTrauma(0.12);
+            juice.playSound('ricochet');
             juice.emitSparks((sim.puckX / 100) * W, (sim.puckY / 100) * H, 8, '#06b6d4', '#22d3ee', 3);
-            soundService.playImpact(0.8);
           }
 
-          // Bottom Mallet Collision (near Y = 88)
-          const botPaddleX = sim.paddles[bottomUid];
-          const distBot = Math.hypot(sim.puckX - botPaddleX, sim.puckY - 88);
-          if (distBot <= malletRadius && sim.vy > 0) {
-            sim.vy = -Math.abs(sim.vy);
-            const offset = (sim.puckX - botPaddleX) / malletRadius;
-            sim.vx = offset * 0.8;
-            sim.speed = Math.min(2.5, sim.speed * 1.06);
+          // Bottom Mallet Collision (2D Dynamic Velocity Transfer)
+          const botPad = sim.paddles[bottomUid];
+          const dxBot = sim.puckX - botPad.x;
+          const dyBot = sim.puckY - botPad.y;
+          const distBot = Math.hypot(dxBot, dyBot);
+          if (distBot <= malletRadius && distBot > 0) {
+            const nx = dxBot / distBot;
+            const ny = dyBot / distBot;
+            sim.puckX = botPad.x + nx * malletRadius;
+            sim.puckY = botPad.y + ny * malletRadius;
 
-            juice.addTrauma(0.28);
-            juice.triggerHitStop(40);
+            const dot = sim.vx * nx + sim.vy * ny;
+            sim.vx = (sim.vx - 2 * dot * nx) * 0.9 + botPad.vx * 0.15;
+            sim.vy = (sim.vy - 2 * dot * ny) * 0.9 + botPad.vy * 0.15;
+
+            if (sim.vy > -0.25) sim.vy = -0.55;
+
+            const spd = Math.hypot(sim.vx, sim.vy);
+            if (spd > 2.4) {
+              sim.vx = (sim.vx / spd) * 2.4;
+              sim.vy = (sim.vy / spd) * 2.4;
+            }
+
+            juice.addTrauma(0.35);
+            juice.triggerHitStop(35);
+            juice.playSound('clack');
             juice.emitSparks((sim.puckX / 100) * W, (sim.puckY / 100) * H, 16, '#f59e0b', '#fbbf24', 5);
-            soundService.playImpact(1.4);
           }
 
-          // Top Mallet Collision (near Y = 12)
-          const topPaddleX = sim.paddles[topUid];
-          const distTop = Math.hypot(sim.puckX - topPaddleX, sim.puckY - 12);
-          if (distTop <= malletRadius && sim.vy < 0) {
-            sim.vy = Math.abs(sim.vy);
-            const offset = (sim.puckX - topPaddleX) / malletRadius;
-            sim.vx = offset * 0.8;
-            sim.speed = Math.min(2.5, sim.speed * 1.06);
+          // Top Mallet Collision (2D Dynamic Velocity Transfer)
+          const topPad = sim.paddles[topUid];
+          const dxTop = sim.puckX - topPad.x;
+          const dyTop = sim.puckY - topPad.y;
+          const distTop = Math.hypot(dxTop, dyTop);
+          if (distTop <= malletRadius && distTop > 0) {
+            const nx = dxTop / distTop;
+            const ny = dyTop / distTop;
+            sim.puckX = topPad.x + nx * malletRadius;
+            sim.puckY = topPad.y + ny * malletRadius;
 
-            juice.addTrauma(0.28);
-            juice.triggerHitStop(40);
+            const dot = sim.vx * nx + sim.vy * ny;
+            sim.vx = (sim.vx - 2 * dot * nx) * 0.9 + topPad.vx * 0.15;
+            sim.vy = (sim.vy - 2 * dot * ny) * 0.9 + topPad.vy * 0.15;
+
+            if (sim.vy < 0.25) sim.vy = 0.55;
+
+            const spd = Math.hypot(sim.vx, sim.vy);
+            if (spd > 2.4) {
+              sim.vx = (sim.vx / spd) * 2.4;
+              sim.vy = (sim.vy / spd) * 2.4;
+            }
+
+            juice.addTrauma(0.35);
+            juice.triggerHitStop(35);
+            juice.playSound('clack');
             juice.emitSparks((sim.puckX / 100) * W, (sim.puckY / 100) * H, 16, '#f43f5e', '#fb7185', 5);
-            soundService.playImpact(1.4);
           }
 
           // Goal Check - Top Missed (Bottom Scores)
@@ -447,13 +483,14 @@ export const PongView: React.FC<PongViewProps> = ({
         }
       }
 
-      // 4. Render 3D Circular Mallets (Air Hockey Strikers)
-      const botPX = (sim.prevPaddles[bottomUid] + (sim.paddles[bottomUid] - sim.prevPaddles[bottomUid]) * alpha) / 100 * W;
-      const topPX = (sim.prevPaddles[topUid] + (sim.paddles[topUid] - sim.prevPaddles[topUid]) * alpha) / 100 * W;
+      // 4. Render 3D Circular Mallets (Air Hockey Strikers with full 2D movement)
+      const botPX = (sim.prevPaddles[bottomUid].x + (sim.paddles[bottomUid].x - sim.prevPaddles[bottomUid].x) * alpha) / 100 * W;
+      const botPY = (sim.prevPaddles[bottomUid].y + (sim.paddles[bottomUid].y - sim.prevPaddles[bottomUid].y) * alpha) / 100 * H;
+      const topPX = (sim.prevPaddles[topUid].x + (sim.paddles[topUid].x - sim.prevPaddles[topUid].x) * alpha) / 100 * W;
+      const topPY = (sim.prevPaddles[topUid].y + (sim.paddles[topUid].y - sim.prevPaddles[topUid].y) * alpha) / 100 * H;
       const malletRadiusPx = 28;
 
       // Draw Top Mallet (Crimson / CyberBot)
-      const topPY = 0.12 * H;
       // Mallet Drop Shadow
       ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
       ctx.beginPath();
@@ -480,7 +517,6 @@ export const PongView: React.FC<PongViewProps> = ({
       ctx.fill();
 
       // Draw Bottom Mallet (Gold / Local Player)
-      const botPY = 0.88 * H;
       // Mallet Drop Shadow
       ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
       ctx.beginPath();
@@ -638,28 +674,8 @@ export const PongView: React.FC<PongViewProps> = ({
         </div>
       </div>
 
-      {/* Mobile Steering Touch Pads */}
-      <div className="w-full flex items-center justify-between gap-3 max-w-sm pt-1">
-        <button
-          onPointerDown={() => { mobileSteer.current.left = true; }}
-          onPointerUp={() => { mobileSteer.current.left = false; }}
-          onPointerLeave={() => { mobileSteer.current.left = false; }}
-          className="flex-1 h-12 rounded-2xl bg-slate-900/90 border-2 border-slate-700 active:scale-95 flex items-center justify-center text-xs font-black font-mono shadow-md hover:border-cyan-400 text-cyan-300"
-        >
-          ◀ SLIDE LEFT
-        </button>
-        <button
-          onPointerDown={() => { mobileSteer.current.right = true; }}
-          onPointerUp={() => { mobileSteer.current.right = false; }}
-          onPointerLeave={() => { mobileSteer.current.right = false; }}
-          className="flex-1 h-12 rounded-2xl bg-slate-900/90 border-2 border-slate-700 active:scale-95 flex items-center justify-center text-xs font-black font-mono shadow-md hover:border-cyan-400 text-cyan-300"
-        >
-          SLIDE RIGHT ▶
-        </button>
-      </div>
-
-      <p className="text-xs text-slate-400 font-medium tracking-wide">
-        ⚡ Move mouse or finger to strike the puck • A/D or Arrow keys supported!
+      <p className="text-xs text-cyan-400 font-mono text-center tracking-wide">
+        ⚡ 2D Touch Drag: Touch and drag anywhere on your bottom half to strike the puck!
       </p>
     </div>
   );

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { TicTacToeState } from '../../types/game';
 import type { AuthoritativeRoomState } from '../../types/room';
 import { soundService } from '../../services/sound';
+import { AlertCircle, Sparkles, RefreshCw } from 'lucide-react';
 
 interface TicTacToeViewProps {
   room: AuthoritativeRoomState<TicTacToeState>;
@@ -21,8 +22,15 @@ export const TicTacToeView: React.FC<TicTacToeViewProps> = ({
 
   const players = Object.values(room.players);
   const opponent = players.find(p => p.uid !== playerUid);
+  const opponentUid = opponent?.uid || 'bot_rival';
   const mySymbol = gameState.symbols?.[playerUid] || 'X';
   const opSymbol = mySymbol === 'X' ? 'O' : 'X';
+
+  const myHistory = gameState.history?.[playerUid] || [];
+  const opHistory = gameState.history?.[opponentUid] || [];
+
+  const myOldestCell = myHistory.length >= 3 ? myHistory[0] : null;
+  const opOldestCell = opHistory.length >= 3 ? opHistory[0] : null;
 
   const handleCellClick = (index: number) => {
     if (!isMyTurn || gameState.board[index] !== null || gameState.winningLine !== null) {
@@ -32,6 +40,7 @@ export const TicTacToeView: React.FC<TicTacToeViewProps> = ({
       return;
     }
     soundService.playMove();
+    if (navigator.vibrate) navigator.vibrate(25);
     setLastTapped(index);
     onDispatchAction('TICTACTOE_MOVE', { cellIndex: index });
   };
@@ -47,14 +56,16 @@ export const TicTacToeView: React.FC<TicTacToeViewProps> = ({
   let statusMsg = '';
   let statusClass = 'text-slate-400 border-slate-700 bg-slate-900/80';
   if (gameState.winningLine !== null) {
-    statusMsg = isWinner ? '🎉 YOU WIN THIS ROUND!' : '💥 RIVAL WINS!';
+    statusMsg = isWinner ? '🎉 YOU CLAIMED 3-IN-A-ROW!' : '💥 RIVAL CLAIMED 3-IN-A-ROW!';
     statusClass = isWinner ? 'text-emerald-300 border-emerald-500 bg-emerald-950/80' : 'text-rose-300 border-rose-500 bg-rose-950/80';
-  } else if (gameState.isDraw) {
-    statusMsg = '🤝 IT\'S A DRAW!';
-    statusClass = 'text-amber-300 border-amber-500 bg-amber-950/80';
   } else if (isMyTurn) {
-    statusMsg = `YOUR TURN — TAP A TILE (${mySymbol})`;
-    statusClass = 'text-amber-300 border-amber-500/60 bg-amber-950/60 animate-pulse';
+    if (myHistory.length >= 3) {
+      statusMsg = 'YOUR TURN — 4TH MOVE REMOVES BLINKING MARK!';
+      statusClass = 'text-amber-300 border-amber-500/80 bg-amber-950/70 animate-pulse';
+    } else {
+      statusMsg = `YOUR TURN — PLACE MARK (${myHistory.length + 1}/3)`;
+      statusClass = 'text-amber-300 border-amber-500/60 bg-amber-950/60';
+    }
   } else {
     statusMsg = `RIVAL'S TURN (${opSymbol})...`;
     statusClass = 'text-slate-400 border-slate-700 bg-slate-900/80';
@@ -62,29 +73,65 @@ export const TicTacToeView: React.FC<TicTacToeViewProps> = ({
 
   return (
     <div className="w-full max-w-lg mx-auto flex flex-col items-center select-none gap-3 px-2">
+      {/* Game Mode Title & Rule */}
+      <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-600/20 text-violet-300 border border-violet-500/40 text-[11px] font-mono">
+        <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
+        <span>INFINITE 3-PIECE FIFO • NEVER ENDS IN STALEMATE</span>
+      </div>
+
       {/* Status Pill */}
       <div className={`w-full px-5 py-3 rounded-2xl border-2 flex items-center justify-center gap-2 text-sm font-black font-mono tracking-wider shadow-xl transition-all duration-200 ${statusClass}`}>
-        {isMyTurn && !gameState.winningLine && !gameState.isDraw && (
+        {isMyTurn && !gameState.winningLine && (
           <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shrink-0" />
         )}
         <span className="text-center">{statusMsg}</span>
       </div>
 
-      {/* Player Legend */}
-      <div className="flex items-center gap-6 text-xs font-bold font-mono">
-        <div className="flex items-center gap-2">
-          <span className="text-amber-400 text-2xl font-black">✕</span>
-          <span className="text-slate-300">You ({mySymbol === 'X' ? 'X' : 'O'})</span>
+      {/* Player Legend & 3-Slot Quivers */}
+      <div className="w-full flex items-center justify-between px-3 py-2 rounded-2xl bg-slate-900/80 border border-slate-800 text-xs font-bold font-mono">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <span className="text-amber-400 text-xl font-black">✕</span>
+            <span className="text-slate-300">You ({mySymbol})</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {[0, 1, 2].map((slot) => (
+              <div
+                key={slot}
+                className={`w-3.5 h-1.5 rounded-full transition-all ${
+                  slot < myHistory.length
+                    ? 'bg-amber-400 shadow-[0_0_6px_#f59e0b]'
+                    : 'bg-slate-800'
+                }`}
+              />
+            ))}
+          </div>
         </div>
+
         <span className="text-slate-600 font-black">VS</span>
-        <div className="flex items-center gap-2">
-          <span className="text-cyan-400 text-2xl font-black">○</span>
-          <span className="text-slate-300">{opponent?.nickname || 'CyberBot AI'}</span>
+
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex items-center gap-2">
+            <span className="text-slate-300">{opponent?.nickname || 'CyberBot AI'} ({opSymbol})</span>
+            <span className="text-cyan-400 text-xl font-black">○</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {[0, 1, 2].map((slot) => (
+              <div
+                key={slot}
+                className={`w-3.5 h-1.5 rounded-full transition-all ${
+                  slot < opHistory.length
+                    ? 'bg-cyan-400 shadow-[0_0_6px_#06b6d4]'
+                    : 'bg-slate-800'
+                }`}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
       {/* 3×3 Grid */}
-      <div className="w-full aspect-square p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 border-2 border-violet-500/40 shadow-2xl grid grid-cols-3 gap-3 sm:gap-4"
+      <div className="w-full aspect-square p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 border-2 border-violet-500/40 shadow-2xl grid grid-cols-3 gap-3 sm:gap-4 relative"
         style={{ boxShadow: '0 0 50px rgba(139,92,246,0.18), 0 25px 70px rgba(0,0,0,0.6)' }}
       >
         {gameState.board.map((cellValue, idx) => {
@@ -92,6 +139,10 @@ export const TicTacToeView: React.FC<TicTacToeViewProps> = ({
           const isWinningCell = gameState.winningLine?.includes(idx);
           const isShaking = shakingCell === idx;
           const justPlaced = lastTapped === idx;
+
+          // Check if this mark is the oldest mark slated to disappear
+          const isMyOldest = myOldestCell === idx;
+          const isOpOldest = opOldestCell === idx;
 
           return (
             <button
@@ -103,16 +154,29 @@ export const TicTacToeView: React.FC<TicTacToeViewProps> = ({
                 ${isWinningCell
                   ? 'bg-emerald-500/30 border-2 border-emerald-400 shadow-xl shadow-emerald-500/50 scale-105 z-10'
                   : cellValue !== null
-                  ? 'bg-slate-800/95 border border-slate-700/80'
+                  ? isMyOldest && isMyTurn
+                    ? 'bg-amber-950/40 border-2 border-dashed border-amber-400/90 animate-pulse'
+                    : isOpOldest && !isMyTurn
+                    ? 'bg-cyan-950/40 border-2 border-dashed border-cyan-400/90 animate-pulse'
+                    : 'bg-slate-800/95 border border-slate-700/80'
                   : isMyTurn
                   ? 'bg-slate-800/70 hover:bg-violet-900/50 border-2 border-slate-700 hover:border-violet-400 active:scale-95 cursor-pointer shadow-inner'
                   : 'bg-slate-900/60 border border-slate-800/60 cursor-not-allowed'
                 }
               `}
             >
+              {/* Oldest Mark Recycle Indicator Badge */}
+              {isMyOldest && isMyTurn && (
+                <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full bg-amber-500/30 text-amber-300 border border-amber-400/50 text-[9px] font-mono font-bold animate-ping">
+                  OUT
+                </div>
+              )}
+
               {owner === 'X' ? (
                 <svg
-                  className={`w-16 h-16 sm:w-20 sm:h-20 text-amber-400 drop-shadow-[0_0_18px_rgba(245,158,11,0.9)] ${justPlaced ? 'animate-pop-in' : ''}`}
+                  className={`w-16 h-16 sm:w-20 sm:h-20 text-amber-400 drop-shadow-[0_0_18px_rgba(245,158,11,0.9)] transition-opacity duration-200 ${
+                    isMyOldest && isMyTurn ? 'opacity-50' : 'opacity-100'
+                  } ${justPlaced ? 'animate-pop-in' : ''}`}
                   viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round"
                 >
                   <line x1="18" y1="6" x2="6" y2="18" />
@@ -120,7 +184,9 @@ export const TicTacToeView: React.FC<TicTacToeViewProps> = ({
                 </svg>
               ) : owner === 'O' ? (
                 <svg
-                  className={`w-16 h-16 sm:w-20 sm:h-20 text-cyan-400 drop-shadow-[0_0_18px_rgba(6,182,212,0.9)] ${justPlaced ? 'animate-pop-in' : ''}`}
+                  className={`w-16 h-16 sm:w-20 sm:h-20 text-cyan-400 drop-shadow-[0_0_18px_rgba(6,182,212,0.9)] transition-opacity duration-200 ${
+                    isOpOldest && !isMyTurn ? 'opacity-50' : 'opacity-100'
+                  } ${justPlaced ? 'animate-pop-in' : ''}`}
                   viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2"
                 >
                   <circle cx="12" cy="12" r="8" />
@@ -133,8 +199,8 @@ export const TicTacToeView: React.FC<TicTacToeViewProps> = ({
         })}
       </div>
 
-      <p className="text-xs text-slate-400 font-medium font-mono">
-        {mySymbol === 'X' ? '✕' : '○'} Get 3 in a line to claim victory
+      <p className="text-xs text-slate-400 font-medium font-mono text-center">
+        Each player gets 3 marks. The 4th mark recycles your oldest mark.
       </p>
     </div>
   );

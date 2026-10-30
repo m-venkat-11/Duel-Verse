@@ -11,7 +11,7 @@ import { submitBlitzAnswer } from '../../engine/numberBlitzEngine';
 import { registerTugTap, resetTapWarRound } from '../../engine/tapFrenzyEngine';
 import { switchRunnerLane, registerRunnerFinish } from '../../engine/obstacleRushEngine';
 import { registerTankKill } from '../../engine/tankDuelEngine';
-import { registerSlapStrike } from '../../engine/slapDuelEngine';
+import { registerSlapStrike, registerFalseDodge } from '../../engine/slapDuelEngine';
 import { registerKnifeThrow, createKnifeMasterInitialState } from '../../engine/knifeMasterEngine';
 import { registerSumoRingOut } from '../../engine/sumoSpinEngine';
 
@@ -672,6 +672,14 @@ export class BroadcastTransport implements IRoomTransport {
             room.matchWinnerUid = res.matchWinnerUid;
           }
         }
+        break;
+      }
+
+      // --- Slap Duel False Dodge ---
+      case 'SLAP_FALSE_DODGE': {
+        const { defenderUid } = payload;
+        const res = registerFalseDodge(room.gameState, defenderUid);
+        room.gameState = res.newState;
         break;
       }
 

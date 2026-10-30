@@ -53,8 +53,9 @@ export function registerKnifeThrow(
   const isP1 = playerUid === p1Uid;
   const p2Uid = Object.keys(state.scores)[1] || 'p2';
 
-  // Knife strikes target at bottom edge (PI / 2) relative to wheel
-  const hitAngle = ((Math.PI / 2) - wheelAngleAtImpact) % (Math.PI * 2);
+  // P1 throws upward hitting at Math.PI / 2; P2 throws downward hitting at -Math.PI / 2
+  const contactAngle = isP1 ? Math.PI / 2 : -Math.PI / 2;
+  const hitAngle = (contactAngle - wheelAngleAtImpact) % (Math.PI * 2);
   const normalizedHitAngle = hitAngle < 0 ? hitAngle + Math.PI * 2 : hitAngle;
 
   // Collision tolerance ~ 0.28 radians (~16 degrees)

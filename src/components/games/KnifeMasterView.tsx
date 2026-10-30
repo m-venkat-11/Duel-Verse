@@ -15,7 +15,7 @@ interface KnifeMasterViewProps {
 
 interface FlyingKnife {
   y: number;
-  speed: number;
+  vy: number;
   ownerUid: string;
   active: boolean;
 }
@@ -43,7 +43,6 @@ export const KnifeMasterView: React.FC<KnifeMasterViewProps> = ({
 
   // Wheel state
   const wheelAngleRef = useRef(0);
-  const wheelSpeedRef = useRef(0.038);
   const flyingKnives = useRef<FlyingKnife[]>([]);
 
   // Player throw
@@ -54,8 +53,8 @@ export const KnifeMasterView: React.FC<KnifeMasterViewProps> = ({
 
     soundService.playClick();
     flyingKnives.current.push({
-      y: 400,
-      speed: 28,
+      y: isP1 ? 420 : 60,
+      vy: isP1 ? -28 : 28,
       ownerUid: playerUid,
       active: true
     });
@@ -71,23 +70,22 @@ export const KnifeMasterView: React.FC<KnifeMasterViewProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [gameState.p1KnivesLeft, gameState.p2KnivesLeft, gameState.roundWinner]);
+  }, [gameState.p1KnivesLeft, gameState.p2KnivesLeft, gameState.roundWinner, isP1]);
 
-  // CyberBot AI Thrower
+  // CyberBot AI Thrower (Times throws into open sectors)
   useEffect(() => {
     if (!isHost || !isBotPlaying || gameState.roundWinner !== null) return;
 
-    // Bot throws every 800ms - 1500ms
     const interval = setInterval(() => {
       if (gameState.p2KnivesLeft > 0) {
         flyingKnives.current.push({
-          y: 400,
-          speed: 28,
+          y: 60,
+          vy: 28,
           ownerUid: p2Uid,
           active: true
         });
       }
-    }, 1100);
+    }, 1200);
 
     return () => clearInterval(interval);
   }, [isHost, isBotPlaying, p2Uid, gameState.p2KnivesLeft, gameState.roundWinner]);
@@ -103,32 +101,35 @@ export const KnifeMasterView: React.FC<KnifeMasterViewProps> = ({
     const W = 600;
     const H = 480;
     const WHEEL_CX = W / 2;
-    const WHEEL_CY = 150;
-    const WHEEL_R = 75;
+    const WHEEL_CY = H / 2;
+    const WHEEL_R = 78;
 
     let timeAcc = 0;
 
     const update = (dt: number) => {
       juice.update(dt);
-      timeAcc += dt;
+      timeAcc += dt * 60;
 
-      // Dynamic rotation with slight speed surges & reversals
-      wheelAngleRef.current += wheelSpeedRef.current;
-      if (Math.sin(timeAcc * 0.8) > 0.95) {
-        wheelSpeedRef.current = -0.045; // brief reverse spin!
-      } else if (Math.sin(timeAcc * 0.8) < -0.95) {
-        wheelSpeedRef.current = 0.045;
-      }
+      // Sinusoidal Dynamic Wheel Rotation with reversals
+      const speedMod = Math.sin(timeAcc * 0.02) * 1.5 + Math.cos(timeAcc * 0.008) * 0.6;
+      wheelAngleRef.current += 0.035 * speedMod;
 
       // Flying Knives
       for (const fk of flyingKnives.current) {
         if (!fk.active) continue;
-        fk.y -= fk.speed;
+        fk.y += fk.vy;
 
-        // Hit target wheel perimeter
-        if (fk.y <= WHEEL_CY + WHEEL_R + 8) {
+        // Check impact with central rotating wheel
+        const isFromBottom = fk.vy < 0;
+        const reachedTarget = isFromBottom
+          ? fk.y <= WHEEL_CY + WHEEL_R + 5
+          : fk.y >= WHEEL_CY - WHEEL_R - 5;
+
+        if (reachedTarget) {
           fk.active = false;
-          soundService.playImpact(1.3);
+          juice.addTrauma(0.25);
+          juice.playSound('thud');
+          juice.emitSparks(WHEEL_CX, isFromBottom ? WHEEL_CY + WHEEL_R : WHEEL_CY - WHEEL_R, 12, '#f59e0b', '#fbbf24', 5);
 
           if (isHost) {
             onDispatchAction('KNIFE_THROW', {
@@ -214,20 +215,31 @@ export const KnifeMasterView: React.FC<KnifeMasterViewProps> = ({
         ctx.save();
         ctx.rotate(blade.angle);
 
-        // Blade pointing outward from center
-        const bladeColor = blade.ownerUid === p1Uid ? '#f59e0b' : blade.ownerUid === p2Uid ? '#06b6d4' : '#ef4444';
+        const isObstacle = blade.ownerUid === 'obstacle';
+        const bladeColor = isObstacle
+          ? '#ef4444'
+          : blade.ownerUid === p1Uid
+          ? '#f59e0b'
+          : '#06b6d4';
 
+        // 1. Blade embedded in rim
         ctx.fillStyle = bladeColor;
         ctx.shadowColor = bladeColor;
         ctx.shadowBlur = 10;
-        // Blade hilt
-        ctx.fillRect(-3, WHEEL_R, 6, 28);
-        // Blade point
+        ctx.fillRect(-2.5, WHEEL_R - 8, 5, 20);
+
+        // 2. Crossguard
+        ctx.fillStyle = '#e2e8f0';
+        ctx.fillRect(-6, WHEEL_R + 12, 12, 3);
+
+        // 3. Handle / Hilt extending outward
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(-3, WHEEL_R + 15, 6, 18);
+
+        // 4. Pommel
+        ctx.fillStyle = bladeColor;
         ctx.beginPath();
-        ctx.moveTo(-3, WHEEL_R + 28);
-        ctx.lineTo(0, WHEEL_R + 36);
-        ctx.lineTo(3, WHEEL_R + 28);
-        ctx.closePath();
+        ctx.arc(0, WHEEL_R + 34, 3.5, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
 
@@ -239,36 +251,67 @@ export const KnifeMasterView: React.FC<KnifeMasterViewProps> = ({
       // 2. Flying Knives
       for (const fk of flyingKnives.current) {
         const kColor = fk.ownerUid === p1Uid ? '#f59e0b' : '#06b6d4';
+        const flyingDown = fk.vy > 0;
         ctx.save();
         ctx.translate(WHEEL_CX, fk.y);
         ctx.fillStyle = kColor;
         ctx.shadowColor = kColor;
+        ctx.shadowBlur = 16;
+
+        if (flyingDown) {
+          // Pointing down
+          ctx.fillRect(-2.5, -18, 5, 22);
+          // Blade tip
+          ctx.beginPath();
+          ctx.moveTo(-2.5, 4);
+          ctx.lineTo(0, 14);
+          ctx.lineTo(2.5, 4);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          // Pointing up
+          ctx.fillRect(-2.5, -4, 5, 22);
+          // Blade tip
+          ctx.beginPath();
+          ctx.moveTo(-2.5, -4);
+          ctx.lineTo(0, -14);
+          ctx.lineTo(2.5, -4);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.shadowBlur = 0;
+        ctx.restore();
+      }
+
+      // 3. Ready Throw Position Knives (Top & Bottom)
+      if (gameState.p1KnivesLeft > 0) {
+        ctx.save();
+        ctx.translate(WHEEL_CX, 415);
+        ctx.fillStyle = '#f59e0b';
+        ctx.shadowColor = '#f59e0b';
         ctx.shadowBlur = 14;
-        ctx.fillRect(-3, 0, 6, 32);
+        ctx.fillRect(-2.5, -4, 5, 24);
         ctx.beginPath();
-        ctx.moveTo(-3, 0);
-        ctx.lineTo(0, -10);
-        ctx.lineTo(3, 0);
+        ctx.moveTo(-2.5, -4);
+        ctx.lineTo(0, -14);
+        ctx.lineTo(2.5, -4);
         ctx.closePath();
         ctx.fill();
         ctx.shadowBlur = 0;
         ctx.restore();
       }
 
-      // 3. Ready Throw Position Knife (Bottom)
-      const myLeft = isP1 ? gameState.p1KnivesLeft : gameState.p2KnivesLeft;
-      if (myLeft > 0) {
-        const myColor = isP1 ? '#f59e0b' : '#06b6d4';
+      if (gameState.p2KnivesLeft > 0) {
         ctx.save();
-        ctx.translate(WHEEL_CX, 410);
-        ctx.fillStyle = myColor;
-        ctx.shadowColor = myColor;
-        ctx.shadowBlur = 12;
-        ctx.fillRect(-3, 0, 6, 34);
+        ctx.translate(WHEEL_CX, 65);
+        ctx.fillStyle = '#06b6d4';
+        ctx.shadowColor = '#06b6d4';
+        ctx.shadowBlur = 14;
+        ctx.fillRect(-2.5, -20, 5, 24);
         ctx.beginPath();
-        ctx.moveTo(-3, 0);
-        ctx.lineTo(0, -10);
-        ctx.lineTo(3, 0);
+        ctx.moveTo(-2.5, 4);
+        ctx.lineTo(0, 14);
+        ctx.lineTo(2.5, 4);
         ctx.closePath();
         ctx.fill();
         ctx.shadowBlur = 0;

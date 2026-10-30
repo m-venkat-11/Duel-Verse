@@ -7,6 +7,7 @@ export interface TicTacToeState {
   symbols: Record<string, 'X' | 'O'>;
   winningLine: number[] | null; // e.g., [0, 1, 2]
   isDraw: boolean;
+  history?: Record<string, number[]>; // player UID -> order of cell indices (FIFO max 3)
 }
 
 // --- 2. Rock Paper Scissors (Best of 5) ---

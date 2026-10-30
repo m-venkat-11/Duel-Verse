@@ -24,8 +24,19 @@ export class JuiceEngine {
   // Particle System Pool
   private particlePool: ObjectPool<Particle>;
 
+  // Web Audio Procedural Synthesizer
+  private audioCtx: AudioContext | null = null;
+
   constructor(maxParticles: number = 250) {
     this.particlePool = new ObjectPool<Particle>(createParticleFactory(), resetParticle, maxParticles);
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        this.audioCtx = new AudioCtx();
+      }
+    } catch {
+      this.audioCtx = null;
+    }
   }
 
   /**
@@ -34,6 +45,93 @@ export class JuiceEngine {
    */
   public addTrauma(amount: number): void {
     this.trauma = Math.min(1.0, this.trauma + amount);
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try {
+        navigator.vibrate(Math.floor(amount * 45));
+      } catch {}
+    }
+  }
+
+  /**
+   * Play procedural sound effect with 0 network asset lag
+   */
+  public playSound(type: 'shoot' | 'thud' | 'spark' | 'clack' | 'goal' | 'click' | 'ricochet'): void {
+    if (!this.audioCtx) return;
+    try {
+      if (this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume();
+      }
+      const now = this.audioCtx.currentTime;
+      const osc = this.audioCtx.createOscillator();
+      const gain = this.audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(this.audioCtx.destination);
+
+      switch (type) {
+        case 'shoot':
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(420, now);
+          osc.frequency.exponentialRampToValueAtTime(110, now + 0.12);
+          gain.gain.setValueAtTime(0.35, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+          osc.start(now);
+          osc.stop(now + 0.12);
+          break;
+        case 'thud':
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(160, now);
+          osc.frequency.exponentialRampToValueAtTime(35, now + 0.18);
+          gain.gain.setValueAtTime(0.5, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+          osc.start(now);
+          osc.stop(now + 0.18);
+          break;
+        case 'spark':
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(900 + Math.random() * 300, now);
+          osc.frequency.linearRampToValueAtTime(1400, now + 0.05);
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+          osc.start(now);
+          osc.stop(now + 0.05);
+          break;
+        case 'clack':
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(580, now);
+          osc.frequency.exponentialRampToValueAtTime(180, now + 0.04);
+          gain.gain.setValueAtTime(0.25, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
+          osc.start(now);
+          osc.stop(now + 0.04);
+          break;
+        case 'ricochet':
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(1200 + Math.random() * 400, now);
+          osc.frequency.exponentialRampToValueAtTime(400, now + 0.08);
+          gain.gain.setValueAtTime(0.22, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+          osc.start(now);
+          osc.stop(now + 0.08);
+          break;
+        case 'goal':
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(220, now);
+          osc.frequency.linearRampToValueAtTime(880, now + 0.35);
+          gain.gain.setValueAtTime(0.4, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+          osc.start(now);
+          osc.stop(now + 0.35);
+          break;
+        case 'click':
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(800, now);
+          gain.gain.setValueAtTime(0.15, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.03);
+          osc.start(now);
+          osc.stop(now + 0.03);
+          break;
+      }
+    } catch {}
   }
 
   /**

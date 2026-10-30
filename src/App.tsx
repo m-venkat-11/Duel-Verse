@@ -142,7 +142,7 @@ export function App() {
 
     // 1. Tic-Tac-Toe (Unbeatable Minimax on Master, snappy 200ms delay)
     if (room.selectedGameId === 'tictactoe' && gs.currentTurn === botUid && !gs.winningLine && !gs.isDraw) {
-      const choice = getCyberBotTicTacToeMove(gs.board, botUid, profile.uid, botDifficulty);
+      const choice = getCyberBotTicTacToeMove(gs.board, botUid, profile.uid, botDifficulty, gs.history);
       if (choice !== -1) {
         const timer = setTimeout(() => {
           activeTransport.dispatchAction({

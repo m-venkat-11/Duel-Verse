@@ -55,7 +55,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({
 
   const handleSwitchLane = (delta: number) => {
     const currentLane = simLanes.current[playerUid] || 1;
-    const nextLane = Math.max(0, Math.min(2, currentLane + delta));
+    const nextLane = Math.max(0, Math.min(3, currentLane + delta));
     if (nextLane !== currentLane) {
       simLanes.current[playerUid] = nextLane;
       soundService.playMove();
@@ -66,14 +66,14 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({
   const handleNitro = () => {
     if (!nitroAvailable) return;
     setNitroAvailable(false);
-    simSpeeds.current[playerUid] = 38; // boost
+    simSpeeds.current[playerUid] = 42; // Nitro boost
     soundService.playSignalAlert?.();
     setTimeout(() => {
-      simSpeeds.current[playerUid] = 22;
-    }, 1200);
+      simSpeeds.current[playerUid] = 24;
+    }, 1400);
     setTimeout(() => {
       setNitroAvailable(true);
-    }, 4000);
+    }, 3800);
   };
 
   // Keyboard controls
@@ -99,41 +99,71 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({
     const canvasMgr = new CanvasManager(canvas);
     const juice = new JuiceEngine(300);
 
-    const W = 640;
-    const H = 480;
+    const W = 520;
+    const H = 640;
     const COURSE_MAX = 1000;
 
     let finishReported = false;
 
+    // Direct touch swipe on canvas
+    let touchStartX = 0;
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches[0]) touchStartX = e.touches[0].clientX;
+    };
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (!e.changedTouches[0]) return;
+      const dx = e.changedTouches[0].clientX - touchStartX;
+      if (dx < -30) handleSwitchLane(-1);
+      else if (dx > 30) handleSwitchLane(1);
+    };
+
+    canvas.addEventListener('touchstart', handleTouchStart);
+    canvas.addEventListener('touchend', handleTouchEnd);
+
     const update = (dt: number) => {
       juice.update(dt);
 
-      // Smooth lane visual interpolation
+      const d1 = simDistances.current[p1Uid] || 0;
+      const d2 = simDistances.current[p2Uid] || 0;
+      const l1 = simLanes.current[p1Uid] ?? 1;
+      const l2 = simLanes.current[p2Uid] ?? 2;
+
+      // Smooth visual lane interpolation
       for (const uid of [p1Uid, p2Uid]) {
         const target = simLanes.current[uid] ?? 1;
-        visualLanes.current[uid] += (target - visualLanes.current[uid]) * 0.25;
+        visualLanes.current[uid] += (target - visualLanes.current[uid]) * 0.28;
 
-        // Advance distance
-        const speed = simSpeeds.current[uid] ?? 22;
+        // Base advancement
+        let speed = simSpeeds.current[uid] ?? 24;
+
+        // Check Slipstream Drafting (car directly behind rival gets +25% boost!)
+        const otherUid = uid === p1Uid ? p2Uid : p1Uid;
+        const myDist = simDistances.current[uid];
+        const otherDist = simDistances.current[otherUid];
+        if (simLanes.current[uid] === simLanes.current[otherUid] && otherDist > myDist && (otherDist - myDist) < 55) {
+          speed *= 1.25; // Aerodynamic suction!
+          juice.emitSparks(W / 2, H * 0.7, 4, '#38bdf8', '#ffffff', 2);
+        }
+
         simDistances.current[uid] += speed * dt;
 
-        // Check hazard collisions for each player
+        // Check hazard collisions
         const dist = simDistances.current[uid];
         for (const h of gameState.hazards) {
           if (Math.abs(dist - h.distance) < 8) {
             const currentLane = simLanes.current[uid];
             if (currentLane === h.lane) {
               if (h.type === 'boost') {
-                simSpeeds.current[uid] = 36;
-                juice.emitSparks(W / 2, H / 2, 10, '#10b981', '#34d399', 3);
-                soundService.playScore();
-                setTimeout(() => { simSpeeds.current[uid] = 22; }, 1000);
+                simSpeeds.current[uid] = 40;
+                juice.emitSparks(W / 2, H / 2, 14, '#10b981', '#34d399', 4);
+                juice.playSound('goal');
+                setTimeout(() => { simSpeeds.current[uid] = 24; }, 1000);
               } else {
-                // Stumble on barrier or EMP
-                simSpeeds.current[uid] = 10;
-                juice.addTrauma(0.25);
-                soundService.playFalseStart();
-                setTimeout(() => { simSpeeds.current[uid] = 22; }, 800);
+                // Stumble on barrier
+                simSpeeds.current[uid] = 12;
+                juice.addTrauma(0.35);
+                juice.playSound('thud');
+                setTimeout(() => { simSpeeds.current[uid] = 24; }, 800);
               }
             }
           }
@@ -151,20 +181,33 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({
         }
       }
 
-      // CyberBot AI Lane Dodging
+      // Check Car-on-Car Bump Shove Physics
+      if (Math.abs(d1 - d2) < 18) {
+        if (Math.abs(l1 - l2) <= 1 && l1 !== l2) {
+          // Bumping adjacent lanes!
+          juice.addTrauma(0.25);
+          juice.playSound('clack');
+          juice.emitSparks(W / 2, H * 0.7, 8, '#fbbf24', '#06b6d4', 3);
+        }
+      }
+
+      // CyberBot AI Lane Dodging & Drafting
       if (isHost && isBotPlaying) {
         const botDist = simDistances.current[p2Uid];
-        // Look ahead 40-70m for hazards
         const upcomingHazard = gameState.hazards.find(
-          (h) => h.distance > botDist + 15 && h.distance < botDist + 65
+          (h) => h.distance > botDist + 15 && h.distance < botDist + 75
         );
         if (upcomingHazard) {
           if (upcomingHazard.type === 'boost') {
-            // Seek boost pad
             simLanes.current[p2Uid] = upcomingHazard.lane;
           } else if (upcomingHazard.lane === simLanes.current[p2Uid]) {
-            // Dodge obstacle into alternate lane
-            simLanes.current[p2Uid] = (upcomingHazard.lane + 1) % 3;
+            // Dodge into safe lane
+            simLanes.current[p2Uid] = (upcomingHazard.lane + 1) % 4;
+          }
+        } else if (Math.random() < 0.02) {
+          // Tactical drafting behind human
+          if (d1 > d2 && Math.random() < 0.6) {
+            simLanes.current[p2Uid] = l1;
           }
         }
       }
@@ -181,139 +224,135 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({
       const scaleY = canvasMgr.height / H;
       ctx.scale(scaleX, scaleY);
 
-      // Deep cyber background
-      ctx.fillStyle = '#060913';
+      // 1. Asphalt Cyber Highway (Vertical 4 Lanes)
+      const surfGrad = ctx.createLinearGradient(0, 0, W, 0);
+      surfGrad.addColorStop(0, '#060a14');
+      surfGrad.addColorStop(0.1, '#0f172a');
+      surfGrad.addColorStop(0.5, '#1e293b');
+      surfGrad.addColorStop(0.9, '#0f172a');
+      surfGrad.addColorStop(1, '#060a14');
+      ctx.fillStyle = surfGrad;
       ctx.fillRect(0, 0, W, H);
 
-      // Render 2 Dual Split Tracks (Top Track = P1, Bottom Track = P2)
-      const trackH = 210;
-      const tracks = [
-        { uid: p1Uid, name: p1Nickname, topY: 20, color: '#f59e0b', trackLabel: 'PLAYER 1 TRACK' },
-        { uid: p2Uid, name: p2Nickname, topY: 250, color: '#06b6d4', trackLabel: 'PLAYER 2 TRACK' }
-      ];
+      // Track Neon Rail Guard Borders
+      ctx.strokeStyle = '#06b6d4';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(30, 0, W - 60, H);
 
-      tracks.forEach((track, tIdx) => {
-        const myDist = simDistances.current[track.uid] || 0;
-        const vLane = visualLanes.current[track.uid] || 1;
+      // 4 Vertical Lanes (3 dashed center lines)
+      const laneW = (W - 80) / 4;
+      const playerDist = simDistances.current[playerUid] || 0;
 
-        // Track surface with perspective gradient
-        const surfGrad = ctx.createLinearGradient(0, track.topY, W, track.topY);
-        surfGrad.addColorStop(0, '#0f172a');
-        surfGrad.addColorStop(0.5, '#1e293b');
-        surfGrad.addColorStop(1, '#0f172a');
-        ctx.fillStyle = surfGrad;
-        ctx.fillRect(20, track.topY, W - 40, trackH);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.setLineDash([20, 24]);
+      ctx.lineDashOffset = -(playerDist * 8) % 44;
 
-        // Neon border
-        ctx.strokeStyle = track.color;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(20, track.topY, W - 40, trackH);
+      for (let l = 1; l < 4; l++) {
+        ctx.beginPath();
+        ctx.moveTo(40 + l * laneW, 0);
+        ctx.lineTo(40 + l * laneW, H);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
 
-        // 3 Highway Lanes (Lane 0 = top, Lane 1 = mid, Lane 2 = bottom)
-        const laneHeight = trackH / 3;
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-        ctx.setLineDash([16, 20]);
-        // Fast horizontal scrolling effect
-        ctx.lineDashOffset = -(myDist * 6) % 36;
-        for (let l = 1; l < 3; l++) {
-          ctx.beginPath();
-          ctx.moveTo(20, track.topY + l * laneHeight);
-          ctx.lineTo(W - 20, track.topY + l * laneHeight);
-          ctx.stroke();
-        }
-        ctx.setLineDash([]);
+      // 2. Render Road Hazards on Unified Highway
+      for (const h of gameState.hazards) {
+        const relDist = h.distance - playerDist;
+        // Visible distance window: -20m to 140m ahead
+        if (relDist >= -20 && relDist <= 140) {
+          const hx = 40 + h.lane * laneW + laneW / 2;
+          const hy = H * 0.75 - (relDist / 140) * (H * 0.7);
 
-        // Render Hazards on this Track
-        for (const h of gameState.hazards) {
-          const relDist = h.distance - myDist;
-          // Visible window ahead: 0 to 180m
-          if (relDist >= -20 && relDist <= 180) {
-            const hx = 90 + (relDist / 180) * (W - 140);
-            const hy = track.topY + h.lane * laneHeight + laneHeight / 2;
-
-            if (h.type === 'boost') {
-              // Green Turbo Pad
-              ctx.fillStyle = '#10b981';
-              ctx.shadowColor = '#10b981';
-              ctx.shadowBlur = 12;
-              ctx.beginPath();
-              ctx.roundRect(hx - 14, hy - 16, 28, 32, 6);
-              ctx.fill();
-              ctx.shadowBlur = 0;
-              ctx.fillStyle = '#ffffff';
-              ctx.font = 'bold 16px sans-serif';
-              ctx.textAlign = 'center';
-              ctx.fillText('⚡', hx, hy + 5);
-            } else {
-              // Red Laser Barrier or EMP
-              ctx.fillStyle = '#f43f5e';
-              ctx.shadowColor = '#f43f5e';
-              ctx.shadowBlur = 14;
-              ctx.beginPath();
-              ctx.roundRect(hx - 12, hy - 20, 24, 40, 6);
-              ctx.fill();
-              ctx.shadowBlur = 0;
-              ctx.fillStyle = '#ffffff';
-              ctx.font = 'bold 16px sans-serif';
-              ctx.textAlign = 'center';
-              ctx.fillText('⚠️', hx, hy + 5);
-            }
+          if (h.type === 'boost') {
+            ctx.fillStyle = '#10b981';
+            ctx.shadowColor = '#10b981';
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.roundRect(hx - 22, hy - 14, 44, 28, 6);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 16px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('⚡ BOOST', hx, hy + 5);
+          } else {
+            ctx.fillStyle = '#f43f5e';
+            ctx.shadowColor = '#f43f5e';
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.roundRect(hx - 22, hy - 14, 44, 28, 6);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 16px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('⚠️ WALL', hx, hy + 5);
           }
         }
+      }
 
-        // Render Cyber Racer Vehicle
-        const racerX = 90;
-        const racerY = track.topY + vLane * laneHeight + laneHeight / 2;
+      // 3. Render Both Cyber Racer Vehicles (Side-by-side vertical perspective)
+      const racers = [
+        { uid: p1Uid, name: p1Nickname, color: '#f59e0b', glow: '#fbbf24' },
+        { uid: p2Uid, name: p2Nickname, color: '#06b6d4', glow: '#22d3ee' }
+      ];
+
+      racers.forEach((r) => {
+        const rDist = simDistances.current[r.uid] || 0;
+        const vLane = visualLanes.current[r.uid] || 1;
+        const rx = 40 + vLane * laneW + laneW / 2;
+        // Y position based on relative distance to local player
+        const relY = H * 0.75 - ((rDist - playerDist) / 140) * (H * 0.7);
 
         ctx.save();
-        ctx.translate(racerX, racerY);
+        ctx.translate(rx, relY);
 
-        // Thruster flame exhaust
-        ctx.fillStyle = track.color;
-        ctx.shadowColor = track.color;
-        ctx.shadowBlur = 15;
+        // Rocket exhaust plume
+        ctx.fillStyle = r.glow;
+        ctx.shadowColor = r.glow;
+        ctx.shadowBlur = 16;
         ctx.beginPath();
-        ctx.moveTo(-16, -6);
-        ctx.lineTo(-30 - Math.random() * 8, 0);
-        ctx.lineTo(-16, 6);
+        ctx.moveTo(-10, 22);
+        ctx.lineTo(0, 36 + Math.random() * 8);
+        ctx.lineTo(10, 22);
         ctx.closePath();
         ctx.fill();
         ctx.shadowBlur = 0;
 
-        // Armored Racer Chassis
+        // Vehicle Chassis
         ctx.fillStyle = '#0f172a';
-        ctx.strokeStyle = track.color;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = r.color;
+        ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.roundRect(-16, -14, 34, 28, 8);
+        ctx.roundRect(-16, -24, 32, 48, 8);
         ctx.fill();
         ctx.stroke();
 
-        // Cockpit Neon Glass
-        ctx.fillStyle = track.color;
+        // Cockpit glass
+        ctx.fillStyle = r.color;
         ctx.beginPath();
-        ctx.roundRect(0, -7, 12, 14, 4);
+        ctx.roundRect(-8, -12, 16, 20, 4);
         ctx.fill();
 
-        ctx.restore();
+        // Player Tag Indicator
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 10px font-mono';
+        ctx.textAlign = 'center';
+        ctx.fillText(r.name.substring(0, 8), 0, -30);
 
-        // Track Name & Speed HUD
-        ctx.fillStyle = track.color;
-        ctx.font = 'bold 12px "Outfit", sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(`${track.name.toUpperCase()} • ${Math.round(myDist)}m / 1000m`, 30, track.topY + 18);
+        ctx.restore();
       });
 
       // Finish Arch / Winner Celebration
       if (winnerName) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.78)';
         ctx.fillRect(0, 0, W, H);
         ctx.fillStyle = '#fbbf24';
         ctx.font = '900 36px "Outfit", sans-serif';
         ctx.textAlign = 'center';
         ctx.shadowColor = '#fbbf24';
         ctx.shadowBlur = 20;
-        ctx.fillText(`🏆 ${winnerName.toUpperCase()} WON THE RACE!`, W / 2, H / 2);
+        ctx.fillText(`🏆 ${winnerName.toUpperCase()} WON!`, W / 2, H / 2);
         ctx.shadowBlur = 0;
       }
 

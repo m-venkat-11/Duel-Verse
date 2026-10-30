@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import type { AuthoritativeRoomState } from '../../types/room';
 import type { SlapDuelState } from '../../engine/slapDuelEngine';
 import { soundService } from '../../services/sound';
-import { Swords, Shield, Zap, Flame, Sparkles } from 'lucide-react';
+import { Swords, Shield, Zap, Lock, AlertTriangle, Sparkles } from 'lucide-react';
 
 interface SlapDuelViewProps {
   room: AuthoritativeRoomState<SlapDuelState>;
@@ -27,25 +27,36 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
   const p2Nickname = room.players[p2Uid]?.nickname || 'CyberBot';
 
   const isAttacker = gameState.attackerUid === playerUid;
+  const defenderUid = isAttacker ? (isP1 ? p2Uid : p1Uid) : playerUid;
 
-  const [handAnim, setHandAnim] = useState<'idle' | 'slap' | 'dodge' | 'hit'>('idle');
-  const [opHandAnim, setOpHandAnim] = useState<'idle' | 'slap' | 'dodge' | 'hit'>('idle');
+  const [handAnim, setHandAnim] = useState<'idle' | 'slap' | 'feint' | 'dodge' | 'hit'>('idle');
+  const [opHandAnim, setOpHandAnim] = useState<'idle' | 'slap' | 'feint' | 'dodge' | 'hit'>('idle');
   const [screenFlash, setScreenFlash] = useState<boolean>(false);
   const [roundMessage, setRoundMessage] = useState<string | null>(null);
 
   const isDodgingRef = useRef(false);
+  const isGenuineSlapRef = useRef(false);
 
+  // Check freeze status
+  const myFrozen = (gameState.frozenUntil?.[playerUid] || 0) > Date.now();
+  const opFrozen = (gameState.frozenUntil?.[isP1 ? p2Uid : p1Uid] || 0) > Date.now();
+
+  const myStrikes = gameState.falseDodges?.[playerUid] || 0;
+  const opStrikes = gameState.falseDodges?.[isP1 ? p2Uid : p1Uid] || 0;
+
+  // 1. Attacker genuine slap
   const handleAttackerSlap = () => {
     if (!isAttacker || handAnim !== 'idle') return;
 
     setHandAnim('slap');
+    isGenuineSlapRef.current = true;
     soundService.playImpact(1.4);
 
-    // Check if opponent is dodging
-    const dodged = isDodgingRef.current;
-
     setTimeout(() => {
-      if (dodged) {
+      isGenuineSlapRef.current = false;
+      const opIsDefendingAndDodging = isDodgingRef.current && !opFrozen;
+
+      if (opIsDefendingAndDodging) {
         soundService.playFalseStart();
         setRoundMessage('💨 MISSED! DEFENDER DODGED!');
         setHandAnim('idle');
@@ -54,10 +65,11 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
       } else {
         // Landed!
         soundService.playGoal();
+        if (navigator.vibrate) navigator.vibrate([40, 20, 60]);
         setScreenFlash(true);
         setOpHandAnim('hit');
         setRoundMessage('💥 SLAP LANDED! +1 POINT!');
-        setTimeout(() => setScreenFlash(false), 200);
+        setTimeout(() => setScreenFlash(false), 220);
 
         setTimeout(() => {
           setHandAnim('idle');
@@ -70,26 +82,43 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
     }, 180);
   };
 
-  const handleDefenderDodge = () => {
-    if (isAttacker || handAnim !== 'idle') return;
-
-    isDodgingRef.current = true;
-    setHandAnim('dodge');
-    soundService.playMove();
-
-    // Dodge lasts 400ms window
-    setTimeout(() => {
-      isDodgingRef.current = false;
-      setHandAnim('idle');
-    }, 450);
-  };
-
+  // 2. Attacker feint (twitch forward, fake-out)
   const handleFeint = () => {
     if (!isAttacker || handAnim !== 'idle') return;
 
-    setHandAnim('slap');
+    setHandAnim('feint');
     soundService.playClick();
-    setTimeout(() => setHandAnim('idle'), 100);
+    setTimeout(() => setHandAnim('idle'), 130);
+  };
+
+  // 3. Defender dodge action with false-dodge strike logic
+  const handleDefenderDodge = () => {
+    if (isAttacker || handAnim !== 'idle') return;
+
+    if (myFrozen) {
+      soundService.playFalseStart();
+      setRoundMessage('🔒 YOU ARE IMMOBILIZED!');
+      setTimeout(() => setRoundMessage(null), 1000);
+      return;
+    }
+
+    setHandAnim('dodge');
+    soundService.playMove();
+
+    // Check if this was a false dodge (attacker did NOT slap)
+    if (!isGenuineSlapRef.current) {
+      soundService.playFalseStart();
+      onDispatchAction('SLAP_FALSE_DODGE', { defenderUid: playerUid });
+      setRoundMessage('⚠️ FALSE DODGE STRIKE!');
+      setTimeout(() => setRoundMessage(null), 1200);
+    } else {
+      isDodgingRef.current = true;
+    }
+
+    setTimeout(() => {
+      isDodgingRef.current = false;
+      setHandAnim('idle');
+    }, 380);
   };
 
   // Keyboard controls
@@ -105,7 +134,7 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAttacker, handAnim]);
+  }, [isAttacker, handAnim, myFrozen]);
 
   // CyberBot AI
   useEffect(() => {
@@ -114,13 +143,35 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
     const botIsAttacker = gameState.attackerUid === p2Uid;
 
     if (botIsAttacker) {
-      // Bot attacks after random suspense delay (1.2s - 2.8s)
+      // Bot attacks or feints after suspense delay
+      const tensionDelay = 1100 + Math.random() * 1400;
+      const willFeintFirst = Math.random() < 0.35;
+
       const timer = setTimeout(() => {
+        if (willFeintFirst) {
+          // Bot feints first!
+          setOpHandAnim('feint');
+          soundService.playClick();
+          setTimeout(() => setOpHandAnim('idle'), 130);
+
+          // After feint, strike shortly after
+          setTimeout(() => {
+            triggerBotSlap();
+          }, 400 + Math.random() * 600);
+        } else {
+          triggerBotSlap();
+        }
+      }, tensionDelay);
+
+      const triggerBotSlap = () => {
         setOpHandAnim('slap');
+        isGenuineSlapRef.current = true;
         soundService.playImpact(1.4);
 
         setTimeout(() => {
-          const humanDodged = isDodgingRef.current;
+          isGenuineSlapRef.current = false;
+          const humanDodged = isDodgingRef.current && !myFrozen;
+
           if (humanDodged) {
             soundService.playFalseStart();
             setRoundMessage('💨 YOU DODGED! ROLES SWAP!');
@@ -129,10 +180,11 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
             onDispatchAction('SLAP_STRIKE', { attackerUid: p2Uid, actingUid: p2Uid, isDodging: true });
           } else {
             soundService.playGoal();
+            if (navigator.vibrate) navigator.vibrate([50, 30, 80]);
             setScreenFlash(true);
             setHandAnim('hit');
             setRoundMessage('💥 BOT SLAPPED YOU!');
-            setTimeout(() => setScreenFlash(false), 200);
+            setTimeout(() => setScreenFlash(false), 220);
 
             setTimeout(() => {
               setOpHandAnim('idle');
@@ -143,12 +195,20 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
             onDispatchAction('SLAP_STRIKE', { attackerUid: p2Uid, actingUid: p2Uid, isDodging: false });
           }
         }, 180);
-      }, 1400 + Math.random() * 1200);
+      };
 
       return () => clearTimeout(timer);
     } else {
-      // Bot is defending: 70% chance to dodge if player slaps
-      if (handAnim === 'slap') {
+      // Bot is defending
+      if (handAnim === 'feint') {
+        // Bot might fall for the feint (35% false dodge)
+        if (Math.random() < 0.35 && !opFrozen) {
+          setOpHandAnim('dodge');
+          onDispatchAction('SLAP_FALSE_DODGE', { defenderUid: p2Uid });
+          setTimeout(() => setOpHandAnim('idle'), 380);
+        }
+      } else if (handAnim === 'slap' && !opFrozen) {
+        // Bot reacts to real slap
         const willDodge = Math.random() < 0.65;
         if (willDodge) {
           isDodgingRef.current = true;
@@ -156,11 +216,11 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
           setTimeout(() => {
             isDodgingRef.current = false;
             setOpHandAnim('idle');
-          }, 450);
+          }, 380);
         }
       }
     }
-  }, [isHost, isBotPlaying, gameState.attackerUid, handAnim, onDispatchAction]);
+  }, [isHost, isBotPlaying, gameState.attackerUid, handAnim, myFrozen, opFrozen, onDispatchAction]);
 
   const p1Score = gameState.scores?.[p1Uid] || 0;
   const p2Score = gameState.scores?.[p2Uid] || 0;
@@ -209,22 +269,45 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
         </div>
       </div>
 
-      {/* Role Banner */}
-      <div className={`w-full py-2.5 px-4 rounded-2xl text-center font-black font-['Outfit'] text-sm sm:text-base border-2 shadow-lg flex items-center justify-center gap-2 ${
-        isAttacker
-          ? 'bg-amber-500/20 border-amber-400 text-amber-300 shadow-amber-500/20 animate-pulse'
-          : 'bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-cyan-500/20'
-      }`}>
-        {isAttacker ? (
-          <>
-            <Swords className="w-5 h-5" />
-            <span>YOU ARE ATTACKING — SLAP OR FEINT!</span>
-          </>
-        ) : (
-          <>
-            <Shield className="w-5 h-5" />
-            <span>YOU ARE DEFENDING — WATCH AND DODGE!</span>
-          </>
+      {/* Role Banner & Strike Penalty Meter */}
+      <div className="w-full flex flex-col gap-1.5">
+        <div className={`w-full py-2.5 px-4 rounded-2xl text-center font-black font-['Outfit'] text-sm sm:text-base border-2 shadow-lg flex items-center justify-center gap-2 ${
+          isAttacker
+            ? 'bg-amber-500/20 border-amber-400 text-amber-300 shadow-amber-500/20 animate-pulse'
+            : 'bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-cyan-500/20'
+        }`}>
+          {isAttacker ? (
+            <>
+              <Swords className="w-5 h-5" />
+              <span>YOU ATTACK — SLAP OR FEINT!</span>
+            </>
+          ) : (
+            <>
+              <Shield className="w-5 h-5" />
+              <span>YOU DEFEND — WATCH & DODGE!</span>
+            </>
+          )}
+        </div>
+
+        {/* Defender Strikes Warning Indicator */}
+        {!isAttacker && (
+          <div className="w-full flex items-center justify-between px-3 py-1 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px] font-mono">
+            <span className="text-slate-400">FALSE DODGE STRIKES:</span>
+            <div className="flex items-center gap-1.5">
+              {[1, 2, 3].map((s) => (
+                <span
+                  key={s}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                    s <= myStrikes
+                      ? 'bg-rose-500 text-white shadow-[0_0_8px_#f43f5e]'
+                      : 'bg-slate-800 text-slate-500'
+                  }`}
+                >
+                  STRIKE {s}
+                </span>
+              ))}
+            </div>
+          </div>
         )}
       </div>
 
@@ -236,26 +319,37 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
           boxShadow: '0 0 50px rgba(139, 92, 246, 0.15), inset 0 2px 6px rgba(255, 255, 255, 0.1)'
         }}
       >
-        {/* Table Felt Center Line */}
+        {/* Table Center Line */}
         <div className="absolute inset-x-8 top-1/2 h-0.5 border-t border-dashed border-white/10 pointer-events-none" />
 
         {/* OPPONENT HAND (Top) */}
         <div className="w-full flex flex-col items-center relative transition-transform duration-150">
-          <span className="text-[11px] font-mono text-cyan-400 font-bold mb-2">
-            {isAttacker ? '🛡️ DEFENDER' : '⚔️ ATTACKER'}
+          <span className="text-[11px] font-mono text-cyan-400 font-bold mb-2 flex items-center gap-1">
+            {isAttacker ? (
+              <>
+                <span>🛡️ DEFENDER</span>
+                {opFrozen && <span className="text-rose-400 animate-pulse font-black">[FROZEN!]</span>}
+              </>
+            ) : (
+              <span>⚔️ ATTACKER</span>
+            )}
           </span>
           <div
             className={`w-36 h-36 sm:w-44 sm:h-44 rounded-3xl flex items-center justify-center text-7xl sm:text-8xl transition-all duration-150 select-none ${
               opHandAnim === 'slap'
                 ? 'translate-y-24 scale-125 rotate-6 text-rose-400 drop-shadow-[0_0_30px_#f43f5e]'
+                : opHandAnim === 'feint'
+                ? 'translate-y-8 scale-105 rotate-3 text-cyan-400'
                 : opHandAnim === 'dodge'
                 ? '-translate-y-12 scale-90 opacity-60'
                 : opHandAnim === 'hit'
                 ? 'scale-110 text-rose-500 animate-wiggle drop-shadow-[0_0_35px_#f43f5e]'
+                : opFrozen
+                ? 'text-cyan-600 scale-95 opacity-50 blur-[0.5px]'
                 : 'translate-y-0 text-cyan-300'
             }`}
           >
-            {opHandAnim === 'hit' ? '💥' : '🖐️'}
+            {opFrozen ? '🔒' : opHandAnim === 'hit' ? '💥' : '🖐️'}
           </div>
         </div>
 
@@ -272,17 +366,28 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
             className={`w-36 h-36 sm:w-44 sm:h-44 rounded-3xl flex items-center justify-center text-7xl sm:text-8xl transition-all duration-150 select-none ${
               handAnim === 'slap'
                 ? '-translate-y-24 scale-125 -rotate-6 text-amber-400 drop-shadow-[0_0_30px_#f59e0b]'
+                : handAnim === 'feint'
+                ? '-translate-y-8 scale-105 -rotate-3 text-amber-300'
                 : handAnim === 'dodge'
                 ? 'translate-y-12 scale-90 opacity-60'
                 : handAnim === 'hit'
                 ? 'scale-110 text-rose-500 animate-wiggle drop-shadow-[0_0_35px_#f43f5e]'
+                : myFrozen
+                ? 'text-amber-600 scale-95 opacity-50 blur-[0.5px]'
                 : 'translate-y-0 text-amber-400'
             }`}
           >
-            {handAnim === 'hit' ? '💥' : '🖐️'}
+            {myFrozen ? '🔒' : handAnim === 'hit' ? '💥' : '🖐️'}
           </div>
-          <span className="text-[11px] font-mono text-amber-400 font-bold mt-2">
-            {isAttacker ? '⚔️ ATTACKER (YOU)' : '🛡️ DEFENDER (YOU)'}
+          <span className="text-[11px] font-mono text-amber-400 font-bold mt-2 flex items-center gap-1">
+            {isAttacker ? (
+              <span>⚔️ ATTACKER (YOU)</span>
+            ) : (
+              <>
+                <span>🛡️ DEFENDER (YOU)</span>
+                {myFrozen && <span className="text-rose-400 animate-pulse font-black">[FROZEN!]</span>}
+              </>
+            )}
           </span>
         </div>
       </div>
@@ -308,10 +413,24 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
         ) : (
           <button
             onClick={handleDefenderDodge}
-            className="w-full h-16 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 border-2 border-cyan-300 text-slate-950 font-black font-['Outfit'] text-xl active:scale-95 shadow-2xl shadow-cyan-500/30 flex items-center justify-center gap-2"
+            disabled={myFrozen}
+            className={`w-full h-16 rounded-2xl border-2 font-black font-['Outfit'] text-xl active:scale-95 shadow-2xl flex items-center justify-center gap-2 transition ${
+              myFrozen
+                ? 'bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed opacity-60'
+                : 'bg-gradient-to-r from-cyan-500 to-blue-600 border-cyan-300 text-slate-950 shadow-cyan-500/30'
+            }`}
           >
-            <Shield className="w-6 h-6 fill-current" />
-            <span>DODGE / RETREAT!</span>
+            {myFrozen ? (
+              <>
+                <Lock className="w-6 h-6" />
+                <span>IMMOBILIZED (2s)</span>
+              </>
+            ) : (
+              <>
+                <Shield className="w-6 h-6 fill-current" />
+                <span>DODGE / RETREAT!</span>
+              </>
+            )}
           </button>
         )}
       </div>

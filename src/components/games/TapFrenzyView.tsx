@@ -48,12 +48,30 @@ export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({
   const p1Percent = Math.max(0, Math.min(100, 50 - (pos / 2)));
   const p2Percent = 100 - p1Percent;
 
+  const [goldenBubble, setGoldenBubble] = useState<{ id: string; x: number; y: number } | null>(null);
+
+  // Periodic Golden 3X Surge Bubble Spawner
+  useEffect(() => {
+    if (gameState.roundWinner !== null) return;
+    const interval = setInterval(() => {
+      if (Math.random() < 0.65 && !goldenBubble) {
+        setGoldenBubble({
+          id: Math.random().toString(36).substring(2, 7),
+          x: 20 + Math.random() * 60,
+          y: 25 + Math.random() * 50
+        });
+        setTimeout(() => setGoldenBubble(null), 2000);
+      }
+    }, 3500);
+
+    return () => clearInterval(interval);
+  }, [gameState.roundWinner, goldenBubble]);
+
   const handleTap = (e?: React.PointerEvent) => {
     if (gameState.roundWinner !== null) return;
 
     const now = Date.now();
     tapTimestampsRef.current.push(now);
-    // Keep timestamps from last 1 second
     tapTimestampsRef.current = tapTimestampsRef.current.filter((t) => now - t <= 1000);
     const cps = tapTimestampsRef.current.length;
     setMyCps(cps);
@@ -79,10 +97,24 @@ export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({
     setTimeout(() => setTapScale(false), 80);
 
     soundService.playScore();
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try { navigator.vibrate(15); } catch {}
+    }
 
     // Multiplier bonus if in Frenzy state
     const multiplier = frenzy ? 1.5 : 1.0;
     onDispatchAction('TAP_WAR_MASH', { playerUid, actingUid: playerUid, p1Uid, multiplier });
+  };
+
+  const handlePopGoldenBubble = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!goldenBubble || gameState.roundWinner !== null) return;
+    setGoldenBubble(null);
+    soundService.playGoal();
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try { navigator.vibrate(40); } catch {}
+    }
+    onDispatchAction('TAP_WAR_MASH', { playerUid, actingUid: playerUid, p1Uid, multiplier: 3.0 });
   };
 
   // Keyboard controls
@@ -104,7 +136,7 @@ export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({
   useEffect(() => {
     if (!isHost || !isBotPlaying || gameState.roundWinner !== null) return;
 
-    // Mash speed intervals (every 90ms to 130ms = 8-11 CPS)
+    // Mash speed intervals (every 95ms to 125ms = 8-11 CPS)
     const interval = setInterval(() => {
       if (Math.random() < 0.90) {
         onDispatchAction('TAP_WAR_MASH', { playerUid: p2Uid, actingUid: p2Uid, p1Uid, multiplier: 1.0 });
@@ -230,6 +262,18 @@ export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({
         >
           {/* Specular gloss top light */}
           <div className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/35 to-transparent pointer-events-none" />
+
+          {/* Golden 3X Surge Bubble */}
+          {goldenBubble && (
+            <div
+              onClick={handlePopGoldenBubble}
+              className="absolute z-30 w-16 h-16 rounded-full bg-gradient-to-tr from-amber-400 via-yellow-300 to-white border-2 border-white shadow-[0_0_25px_#fbbf24] flex flex-col items-center justify-center font-black font-['Outfit'] text-slate-950 text-xs animate-bounce cursor-pointer active:scale-125 transition-transform"
+              style={{ left: `${goldenBubble.x}%`, top: `${goldenBubble.y}%` }}
+            >
+              <span className="text-[10px] text-rose-600 font-extrabold">SURGE</span>
+              <span className="text-sm font-black leading-none">3X!</span>
+            </div>
+          )}
 
           {/* Ripples on tap */}
           {ripples.map((rip) => (

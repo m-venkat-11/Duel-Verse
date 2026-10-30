@@ -142,14 +142,42 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
     let roundPauseTimer = 0;
     let isRoundOver = false;
 
+    // Track driving states for auto-spin/hold-to-drive/release-to-fire
+    const tankDriving = {
+      [p1Uid]: false,
+      [p2Uid]: false
+    };
+
+    const resolveTankWallSlide = (px: number, py: number, radius: number): { x: number; y: number } => {
+      let cx = px;
+      let cy = py;
+      for (const obs of obstacles) {
+        const nearestX = Math.max(obs.x, Math.min(cx, obs.x + obs.w));
+        const nearestY = Math.max(obs.y, Math.min(cy, obs.y + obs.h));
+        const dx = cx - nearestX;
+        const dy = cy - nearestY;
+        const dist = Math.hypot(dx, dy);
+        if (dist < radius && dist > 0.0001) {
+          const overlap = radius - dist;
+          const nx = dx / dist;
+          const ny = dy / dist;
+          cx += nx * overlap;
+          cy += ny * overlap;
+        }
+      }
+      cx = Math.max(radius + 12, Math.min(W - radius - 12, cx));
+      cy = Math.max(radius + 12, Math.min(H - radius - 12, cy));
+      return { x: cx, y: cy };
+    };
+
     const fireBullet = (ownerUid: string) => {
       const t = tanks[ownerUid];
       if (!t || !t.alive || t.reload > 0) return;
-      t.reload = 0.4;
-      t.recoil = 8;
+      t.reload = 0.28;
+      t.recoil = 10;
 
-      const tipX = t.x + Math.cos(t.angle) * (TANK_RADIUS + 8);
-      const tipY = t.y + Math.sin(t.angle) * (TANK_RADIUS + 8);
+      const tipX = t.x + Math.cos(t.angle) * (TANK_RADIUS + 10);
+      const tipY = t.y + Math.sin(t.angle) * (TANK_RADIUS + 10);
 
       bullets.push({
         x: tipX,
@@ -162,9 +190,9 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
         trail: []
       });
 
-      juice.addTrauma(0.18);
-      juice.emitSparks(tipX, tipY, 12, ownerUid === p1Uid ? '#fbbf24' : '#22d3ee', '#ffffff', 4);
-      soundService.playImpact(1.7);
+      juice.addTrauma(0.3);
+      juice.playSound('shoot');
+      juice.emitSparks(tipX, tipY, 14, ownerUid === p1Uid ? '#fbbf24' : '#22d3ee', '#ffffff', 4);
     };
 
     const update = (dt: number) => {
@@ -181,7 +209,6 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
       if (isRoundOver) {
         roundPauseTimer -= dt;
         if (roundPauseTimer <= 0) {
-          // Reset round
           isRoundOver = false;
           setRoundWinnerName(null);
           tanks[p1Uid].x = 75;
@@ -189,54 +216,52 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
           tanks[p1Uid].angle = 0;
           tanks[p1Uid].alive = true;
           tanks[p1Uid].recoil = 0;
+          tankDriving[p1Uid] = false;
+
           tanks[p2Uid].x = 565;
           tanks[p2Uid].y = 240;
           tanks[p2Uid].angle = Math.PI;
           tanks[p2Uid].alive = true;
           tanks[p2Uid].recoil = 0;
+          tankDriving[p2Uid] = false;
+
           bullets.length = 0;
         }
         return;
       }
 
-      // 1. Controls for My Tank
+      // 1. Controls for My Tank (P1)
       const myTank = tanks[playerUid];
       if (myTank && myTank.alive) {
         myTank.reload = Math.max(0, myTank.reload - dt);
         myTank.recoil = Math.max(0, myTank.recoil - dt * 25);
 
         if (controlMode === 'onebutton') {
-          // Play Store 1-Button Mode: Hold to move forward, release to rotate!
-          const isHolding = mobileControls.current.oneButtonDown || keysDown.current['w'] || keysDown.current['arrowup'];
+          // JINDOBLU 1-BUTTON AUTO-SPIN MECHANIC:
+          // Held = Drive straight smoothly with wall sliding
+          // Released = Fire cannon shell & resume 360° rotational scan!
+          const isHolding = mobileControls.current.oneButtonDown || keysDown.current[' '] || keysDown.current['w'] || keysDown.current['arrowup'] || keysDown.current['enter'];
+
           if (isHolding) {
+            tankDriving[playerUid] = true;
             const nextX = myTank.x + Math.cos(myTank.angle) * MOVE_SPEED;
             const nextY = myTank.y + Math.sin(myTank.angle) * MOVE_SPEED;
+            const resolved = resolveTankWallSlide(nextX, nextY, TANK_RADIUS);
+            myTank.x = resolved.x;
+            myTank.y = resolved.y;
 
-            // Check obstacle collision
-            let hitObs = false;
-            for (const obs of obstacles) {
-              if (nextX + TANK_RADIUS > obs.x && nextX - TANK_RADIUS < obs.x + obs.w &&
-                  nextY + TANK_RADIUS > obs.y && nextY - TANK_RADIUS < obs.y + obs.h) {
-                hitObs = true;
-                break;
-              }
-            }
-            if (!hitObs && nextX >= TANK_RADIUS + 10 && nextX <= W - TANK_RADIUS - 10) myTank.x = nextX;
-            if (!hitObs && nextY >= TANK_RADIUS + 10 && nextY <= H - TANK_RADIUS - 10) myTank.y = nextY;
-
-            myTank.trackAnim += dt * 15;
-            if (Math.random() < 0.25) {
+            myTank.trackAnim += dt * 16;
+            if (Math.random() < 0.28) {
               treadMarks.push({ x: myTank.x, y: myTank.y, angle: myTank.angle, alpha: 0.5 });
             }
           } else {
-            myTank.angle += ROT_SPEED * 1.25;
-          }
-
-          // Firing in 1-button mode
-          const isFire = keysDown.current[' '] || keysDown.current['enter'] || mobileControls.current.fire;
-          if (isFire && myTank.reload === 0) {
-            fireBullet(playerUid);
-            mobileControls.current.fire = false;
+            // Check if player just released the button -> FIRE!
+            if (tankDriving[playerUid]) {
+              fireBullet(playerUid);
+              tankDriving[playerUid] = false;
+            }
+            // Rotate in place scanning
+            myTank.angle += ROT_SPEED * 1.15;
           }
         } else {
           // Classic D-Pad / Keyboard Controls
@@ -251,21 +276,12 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
           if (isFwd) {
             const nextX = myTank.x + Math.cos(myTank.angle) * MOVE_SPEED;
             const nextY = myTank.y + Math.sin(myTank.angle) * MOVE_SPEED;
+            const resolved = resolveTankWallSlide(nextX, nextY, TANK_RADIUS);
+            myTank.x = resolved.x;
+            myTank.y = resolved.y;
 
-            let hitObs = false;
-            for (const obs of obstacles) {
-              if (nextX + TANK_RADIUS > obs.x && nextX - TANK_RADIUS < obs.x + obs.w &&
-                  nextY + TANK_RADIUS > obs.y && nextY - TANK_RADIUS < obs.y + obs.h) {
-                hitObs = true;
-                break;
-              }
-            }
-
-            if (!hitObs && nextX >= TANK_RADIUS + 10 && nextX <= W - TANK_RADIUS - 10) myTank.x = nextX;
-            if (!hitObs && nextY >= TANK_RADIUS + 10 && nextY <= H - TANK_RADIUS - 10) myTank.y = nextY;
-
-            myTank.trackAnim += dt * 15;
-            if (Math.random() < 0.25) {
+            myTank.trackAnim += dt * 16;
+            if (Math.random() < 0.28) {
               treadMarks.push({ x: myTank.x, y: myTank.y, angle: myTank.angle, alpha: 0.5 });
             }
           }
@@ -277,7 +293,7 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
         }
       }
 
-      // 2. CyberBot AI (Master-tier competitive AI with obstacle evasion and predictive lead)
+      // 2. CyberBot AI (Smart JindoBlu Auto-Spin Rival AI)
       if (isHost && isBotPlaying) {
         const botTank = tanks[p2Uid];
         const humanTank = tanks[p1Uid];
@@ -290,44 +306,56 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
           const dy = humanTank.y - botTank.y;
           const dist = Math.hypot(dx, dy);
 
-          // Aim with predictive lead
           const targetAngle = Math.atan2(dy, dx);
           let angleDiff = targetAngle - botTank.angle;
           while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
           while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
-          if (Math.abs(angleDiff) > 0.04) {
-            botTank.angle += Math.sign(angleDiff) * ROT_SPEED * 1.15;
-          }
+          if (controlMode === 'onebutton') {
+            // Bot 1-button behavior:
+            // Aligned within ±16° of player -> drive towards or flank
+            const isAligned = Math.abs(angleDiff) < 0.28;
 
-          // Tactical maneuvering
-          let moveDir = 1;
-          if (dist < 140) moveDir = -0.6; // Keep distance
-          else if (dist > 300) moveDir = 1.1;
+            if (isAligned && dist > 120 && !tankDriving[p2Uid]) {
+              tankDriving[p2Uid] = true;
+            } else if (tankDriving[p2Uid]) {
+              // Bot is driving forward
+              const nextX = botTank.x + Math.cos(botTank.angle) * MOVE_SPEED * 0.95;
+              const nextY = botTank.y + Math.sin(botTank.angle) * MOVE_SPEED * 0.95;
+              const resolved = resolveTankWallSlide(nextX, nextY, TANK_RADIUS);
+              botTank.x = resolved.x;
+              botTank.y = resolved.y;
+              botTank.trackAnim += dt * 15;
 
-          const nextX = botTank.x + Math.cos(botTank.angle) * MOVE_SPEED * 0.9 * moveDir;
-          const nextY = botTank.y + Math.sin(botTank.angle) * MOVE_SPEED * 0.9 * moveDir;
-
-          let hitObs = false;
-          for (const obs of obstacles) {
-            if (nextX + TANK_RADIUS > obs.x && nextX - TANK_RADIUS < obs.x + obs.w &&
-                nextY + TANK_RADIUS > obs.y && nextY - TANK_RADIUS < obs.y + obs.h) {
-              hitObs = true;
-              break;
+              // If close or aligned with target line, release to FIRE!
+              if (dist < 220 || Math.abs(angleDiff) < 0.12 || Math.random() < 0.02) {
+                fireBullet(p2Uid);
+                tankDriving[p2Uid] = false;
+              }
+            } else {
+              // Scanning rotation
+              botTank.angle += ROT_SPEED * 1.1;
+              if (Math.abs(angleDiff) < 0.15 && botTank.reload === 0) {
+                fireBullet(p2Uid);
+              }
             }
-          }
+          } else {
+            // Classic D-pad steering for Bot
+            if (Math.abs(angleDiff) > 0.05) {
+              botTank.angle += Math.sign(angleDiff) * ROT_SPEED * 1.15;
+            }
 
-          if (!hitObs && nextX >= TANK_RADIUS + 12 && nextX <= W - TANK_RADIUS - 12) botTank.x = nextX;
-          else botTank.angle += 0.08; // Turn away from wall
+            let moveDir = dist < 140 ? -0.5 : 1.0;
+            const nextX = botTank.x + Math.cos(botTank.angle) * MOVE_SPEED * 0.9 * moveDir;
+            const nextY = botTank.y + Math.sin(botTank.angle) * MOVE_SPEED * 0.9 * moveDir;
+            const resolved = resolveTankWallSlide(nextX, nextY, TANK_RADIUS);
+            botTank.x = resolved.x;
+            botTank.y = resolved.y;
+            botTank.trackAnim += dt * 15;
 
-          if (!hitObs && nextY >= TANK_RADIUS + 12 && nextY <= H - TANK_RADIUS - 12) botTank.y = nextY;
-          else botTank.angle += 0.08;
-
-          botTank.trackAnim += dt * 15;
-
-          // Fire when crosshair aligns with player
-          if (Math.abs(angleDiff) < 0.22 && botTank.reload === 0) {
-            fireBullet(p2Uid);
+            if (Math.abs(angleDiff) < 0.20 && botTank.reload === 0) {
+              fireBullet(p2Uid);
+            }
           }
         }
       }
@@ -649,37 +677,23 @@ export const TankDuelView: React.FC<TankDuelViewProps> = ({
 
       {/* Tactile Mobile Controls */}
       {controlMode === 'onebutton' ? (
-        <div className="w-full max-w-md grid grid-cols-2 gap-3 pt-2">
-          {/* Drive & Rotate Button */}
+        <div className="w-full max-w-md pt-2">
+          {/* Master 1-Button Touch Pad: Hold = Drive • Release = Fire */}
           <button
             onPointerDown={() => { mobileControls.current.oneButtonDown = true; }}
             onPointerUp={() => { mobileControls.current.oneButtonDown = false; }}
             onPointerLeave={() => { mobileControls.current.oneButtonDown = false; }}
-            className="w-full h-20 rounded-3xl bg-gradient-to-r from-amber-500 to-orange-500 p-0.5 shadow-xl active:scale-95 transition"
+            onPointerCancel={() => { mobileControls.current.oneButtonDown = false; }}
+            className="w-full h-24 rounded-3xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 p-1 shadow-2xl active:scale-[0.98] transition-transform select-none touch-none"
           >
-            <div className="w-full h-full rounded-[22px] bg-slate-950 flex flex-col items-center justify-center p-2 text-center">
-              <span className="text-sm sm:text-base font-black font-['Outfit'] text-white tracking-wider flex items-center gap-1.5">
-                <Flame className="w-4 h-4 text-amber-400 animate-pulse" />
-                DRIVE & TURN
+            <div className="w-full h-full rounded-[22px] bg-slate-950 flex flex-col items-center justify-center p-3 text-center">
+              <span className="text-base sm:text-lg font-black font-['Outfit'] text-white tracking-wider flex items-center gap-2">
+                <Flame className="w-5 h-5 text-amber-400 animate-pulse" />
+                <span>HOLD TO DRIVE • RELEASE TO FIRE!</span>
+                <Sparkles className="w-5 h-5 text-rose-400" />
               </span>
-              <span className="text-[10px] text-slate-400 font-mono mt-0.5">
-                Hold = Drive • Release = Turn
-              </span>
-            </div>
-          </button>
-
-          {/* Fire Cannon Button */}
-          <button
-            onClick={() => { mobileControls.current.fire = true; }}
-            className="w-full h-20 rounded-3xl bg-gradient-to-r from-rose-500 to-amber-500 p-0.5 shadow-xl active:scale-95 transition"
-          >
-            <div className="w-full h-full rounded-[22px] bg-slate-950 flex flex-col items-center justify-center p-2 text-center">
-              <span className="text-sm sm:text-base font-black font-['Outfit'] text-white tracking-wider flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-rose-400 animate-bounce" />
-                FIRE CANNON
-              </span>
-              <span className="text-[10px] text-slate-400 font-mono mt-0.5">
-                4-Bounce Plasma Shell
+              <span className="text-xs text-amber-300/80 font-mono mt-1">
+                Auto-rotates when idle • Swept wall slide • 4-bounce plasma shell
               </span>
             </div>
           </button>
