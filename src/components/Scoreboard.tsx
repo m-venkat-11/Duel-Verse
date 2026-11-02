@@ -84,61 +84,83 @@ export const Scoreboard: React.FC<ScoreboardProps> = ({ room, playerUid }) => {
             </div>
           </div>
 
-          {/* Center VS & Round Indicator */}
+          {/* Center VS or Solo Indicator */}
           <div className="flex flex-col items-center px-2 shrink-0">
             <div className="px-2 py-0.5 rounded-full bg-violet-500/20 border border-violet-400/30 text-[10px] font-black text-violet-300 font-mono tracking-widest uppercase mb-0.5">
-              R{room.currentRound}/{room.maxRounds}
+              {!p2 && game.category === 'solo' ? 'SOLO RUN' : `R${room.currentRound}/${room.maxRounds}`}
             </div>
-            <div className="text-xs font-black font-['Outfit'] tracking-widest text-slate-400">
-              VS
-            </div>
+            {!p2 && game.category === 'solo' ? (
+              <div className="text-[10px] text-amber-400 font-bold font-mono">
+                ARCADE
+              </div>
+            ) : (
+              <div className="text-xs font-black font-['Outfit'] tracking-widest text-slate-400">
+                VS
+              </div>
+            )}
             <div className="text-[9px] text-slate-400 font-medium truncate max-w-[90px] text-center hidden sm:block">
               {game.title}
             </div>
           </div>
 
-          {/* Player 2 (Cyan / Sky Fighter) */}
-          <div className="flex items-center justify-end gap-2 sm:gap-3 flex-1 min-w-0 text-right">
-            {/* P2 Score Digit */}
-            <div className="px-2.5 py-1 rounded-xl bg-slate-950/80 border border-cyan-500/30 shadow-inner">
-              <span className="text-2xl sm:text-3xl font-black font-['Outfit'] text-cyan-400 tabular-nums">
-                {p2Score}
-              </span>
+          {/* Player 2 or Solo Target */}
+          {!p2 && game.category === 'solo' ? (
+            <div className="flex items-center justify-end gap-2 sm:gap-3 flex-1 min-w-0 text-right">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs sm:text-sm font-extrabold text-white truncate font-['Outfit']">
+                  Single Player
+                </div>
+                <div className="text-[10px] text-cyan-400/90 font-mono font-bold tracking-wider">
+                  HIGH SCORE MODE
+                </div>
+              </div>
+              <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center text-2xl border-2 border-cyan-500/40 bg-slate-800/80 shadow-md">
+                🕹️
+              </div>
             </div>
-
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-end gap-1.5">
-                {p2?.uid === playerUid && (
-                  <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-cyan-500/20 text-cyan-300 font-bold font-mono border border-cyan-500/30">
-                    YOU
-                  </span>
-                )}
-                <span className="text-xs sm:text-sm font-extrabold text-white truncate font-['Outfit']">
-                  {p2 ? p2.nickname : 'Waiting...'}
+          ) : (
+            <div className="flex items-center justify-end gap-2 sm:gap-3 flex-1 min-w-0 text-right">
+              {/* P2 Score Digit */}
+              <div className="px-2.5 py-1 rounded-xl bg-slate-950/80 border border-cyan-500/30 shadow-inner">
+                <span className="text-2xl sm:text-3xl font-black font-['Outfit'] text-cyan-400 tabular-nums">
+                  {p2Score}
                 </span>
               </div>
-              <div className="text-[10px] text-cyan-400/90 font-mono font-bold tracking-wider">
-                PLAYER 2
-              </div>
-            </div>
 
-            <div className="relative shrink-0">
-              <div
-                className={`w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center text-2xl sm:text-3xl border-2 transition-all shadow-md ${
-                  p2Score > p1Score
-                    ? 'border-cyan-400 bg-cyan-500/25 shadow-cyan-500/30 scale-105'
-                    : 'border-cyan-500/40 bg-slate-800/80'
-                }`}
-              >
-                {p2 ? p2.avatarId : '⏳'}
-              </div>
-              {p2Score > p1Score && (
-                <div className="absolute -top-2 -right-1 p-0.5 rounded-full bg-cyan-400 text-slate-950 shadow-md">
-                  <Crown className="w-3 h-3 fill-current" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-end gap-1.5">
+                  {p2?.uid === playerUid && (
+                    <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-cyan-500/20 text-cyan-300 font-bold font-mono border border-cyan-500/30">
+                      YOU
+                    </span>
+                  )}
+                  <span className="text-xs sm:text-sm font-extrabold text-white truncate font-['Outfit']">
+                    {p2 ? p2.nickname : 'Waiting...'}
+                  </span>
                 </div>
-              )}
+                <div className="text-[10px] text-cyan-400/90 font-mono font-bold tracking-wider">
+                  PLAYER 2
+                </div>
+              </div>
+
+              <div className="relative shrink-0">
+                <div
+                  className={`w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center text-2xl sm:text-3xl border-2 transition-all shadow-md ${
+                    p2Score > p1Score
+                      ? 'border-cyan-400 bg-cyan-500/25 shadow-cyan-500/30 scale-105'
+                      : 'border-cyan-500/40 bg-slate-800/80'
+                  }`}
+                >
+                  {p2 ? p2.avatarId : '⏳'}
+                </div>
+                {p2Score > p1Score && (
+                  <div className="absolute -top-2 -right-1 p-0.5 rounded-full bg-cyan-400 text-slate-950 shadow-md">
+                    <Crown className="w-3 h-3 fill-current" />
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
         </div>
       </div>

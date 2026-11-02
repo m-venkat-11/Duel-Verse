@@ -71,6 +71,21 @@ const COVER_MAP: Record<string, { image: string; fallbackGradient: string; title
     image: '/assets/sumo_spinners_cover.jpg',
     fallbackGradient: 'from-amber-600 via-orange-500 to-red-600',
     title: 'Sumo Spinners'
+  },
+  flappyspidey: {
+    image: '/assets/flappy_spidey_cover.jpg',
+    fallbackGradient: 'from-red-600 via-rose-500 to-blue-600',
+    title: 'Flappy Spidey'
+  },
+  cyber2048: {
+    image: '/assets/cyber_2048_cover.jpg',
+    fallbackGradient: 'from-cyan-500 via-purple-600 to-amber-500',
+    title: 'Cyber 2048'
+  },
+  cybersudoku: {
+    image: '/assets/cyber_sudoku_cover.jpg',
+    fallbackGradient: 'from-indigo-600 via-violet-600 to-cyan-500',
+    title: 'Cyber Sudoku'
   }
 };
 

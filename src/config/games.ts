@@ -1,10 +1,10 @@
-export type GameCategory = 'all' | 'foundational' | 'physics' | 'reflex' | 'brain';
+export type GameCategory = 'all' | 'solo' | 'foundational' | 'physics' | 'reflex' | 'brain';
 
 export interface GameMetadata {
   id: string;
   title: string;
   tagline: string;
-  category: 'foundational' | 'physics' | 'reflex' | 'brain';
+  category: 'solo' | 'foundational' | 'physics' | 'reflex' | 'brain';
   playersRange: string;
   estDurationSec: number;
   difficulty: 'Casual' | 'Tactical' | 'Reflex' | 'Intense';
@@ -195,6 +195,48 @@ export const GAMES_CATALOG: GameMetadata[] = [
     accentColor: '#F59E0B',
     accentGradient: 'from-amber-500 via-orange-600 to-red-600',
     description: 'Control a heavy armored spinning top in a zero-friction circular ring. Ram your rival to knock them over the electrified edge!',
+    featured: true,
+    playable: true
+  },
+  {
+    id: 'flappyspidey',
+    title: 'Flappy Spidey',
+    tagline: 'Web-slinging skyline avenger dash',
+    category: 'solo',
+    playersRange: 'Solo & 1v1',
+    estDurationSec: 60,
+    difficulty: 'Reflex',
+    accentColor: '#EF4444',
+    accentGradient: 'from-red-600 via-rose-500 to-blue-600',
+    description: 'Tap to swing and shoot webs between Manhattan high-rises! Dodge Electro conduits, gather Stark power reactors, and survive as long as you can!',
+    featured: true,
+    playable: true
+  },
+  {
+    id: 'cyber2048',
+    title: 'Cyber 2048',
+    tagline: 'Neon synthwave tile fusion matrix',
+    category: 'solo',
+    playersRange: 'Solo & 1v1',
+    estDurationSec: 120,
+    difficulty: 'Tactical',
+    accentColor: '#8B5CF6',
+    accentGradient: 'from-cyan-500 via-purple-600 to-amber-500',
+    description: 'Slide and merge matching neon quantum power cells (2 → 4 → 8... → 2048). Features smooth tile animations, undo, and musical chords!',
+    featured: true,
+    playable: true
+  },
+  {
+    id: 'cybersudoku',
+    title: 'Cyber Sudoku',
+    tagline: 'Tactical number logic puzzle matrix',
+    category: 'solo',
+    playersRange: 'Solo & 1v1',
+    estDurationSec: 180,
+    difficulty: 'Tactical',
+    accentColor: '#06B6D4',
+    accentGradient: 'from-indigo-600 via-violet-600 to-cyan-500',
+    description: 'Hack the 9×9 matrix grid with logic and deduction! Features multiple difficulty levels, smart candidate notes, hints, and error tracking.',
     featured: true,
     playable: true
   }

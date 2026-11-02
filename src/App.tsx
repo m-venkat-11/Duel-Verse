@@ -31,6 +31,9 @@ import { TankDuelView } from './components/games/TankDuelView';
 import { SlapDuelView } from './components/games/SlapDuelView';
 import { KnifeMasterView } from './components/games/KnifeMasterView';
 import { SumoSpinView } from './components/games/SumoSpinView';
+import { FlappySpideyView } from './components/games/FlappySpideyView';
+import { Cyber2048View } from './components/games/Cyber2048View';
+import { CyberSudokuView } from './components/games/CyberSudokuView';
 import {
   getCyberBotTicTacToeMove,
   getCyberBotConnectFourMove,
@@ -579,6 +582,30 @@ export function App() {
       case 'sumospin':
         return (
           <SumoSpinView
+            room={room}
+            playerUid={profile.uid}
+            onDispatchAction={handleDispatchAction}
+          />
+        );
+      case 'flappyspidey':
+        return (
+          <FlappySpideyView
+            room={room}
+            playerUid={profile.uid}
+            onDispatchAction={handleDispatchAction}
+          />
+        );
+      case 'cyber2048':
+        return (
+          <Cyber2048View
+            room={room}
+            playerUid={profile.uid}
+            onDispatchAction={handleDispatchAction}
+          />
+        );
+      case 'cybersudoku':
+        return (
+          <CyberSudokuView
             room={room}
             playerUid={profile.uid}
             onDispatchAction={handleDispatchAction}

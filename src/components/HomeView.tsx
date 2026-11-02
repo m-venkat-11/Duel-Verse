@@ -77,6 +77,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   const categories: { id: GameCategory; label: string; icon: string }[] = [
     { id: 'all', label: `All Titles (${GAMES_CATALOG.length})`, icon: '🎮' },
+    { id: 'solo', label: 'Solo & Single Player', icon: '🕹️' },
     { id: 'physics', label: 'Physics & Action', icon: '🏃' },
     { id: 'foundational', label: 'Classics', icon: '⚔️' },
     { id: 'reflex', label: 'Reflex Speed', icon: '⚡' },

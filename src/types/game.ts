@@ -138,3 +138,63 @@ export interface TapFrenzyState {
   scores: Record<string, number>;
   frozenUntil: Record<string, number>;
 }
+
+// --- 14. Flappy Spidey Avenger ---
+export interface SpideyObstacle {
+  id: string;
+  x: number;
+  width: number;
+  topHeight: number;
+  gap: number;
+  passed: boolean;
+  hasReactor: boolean;
+  reactorY?: number;
+  reactorCollected?: boolean;
+}
+
+export interface FlappySpideyState {
+  playerUid: string;
+  phase: 'ready' | 'playing' | 'gameover';
+  score: number;
+  highScore: number;
+  distance: number;
+  scores: Record<string, number>;
+  targetScore: number;
+}
+
+// --- 15. Cyber 2048 ---
+export interface Cyber2048State {
+  grid: number[][];
+  score: number;
+  bestScore: number;
+  previousGrid?: number[][];
+  previousScore?: number;
+  canUndo: boolean;
+  won: boolean;
+  gameOver: boolean;
+  keepPlaying: boolean;
+}
+
+// --- 16. Cyber Sudoku ---
+export type SudokuDifficulty = 'casual' | 'tactical' | 'hacker' | 'master';
+
+export interface SudokuCell {
+  row: number;
+  col: number;
+  value: number;
+  solution: number;
+  initial: boolean;
+  notes: number[];
+  error?: boolean;
+}
+
+export interface CyberSudokuState {
+  grid: SudokuCell[][];
+  difficulty: SudokuDifficulty;
+  mistakes: number;
+  maxMistakes: number;
+  timeSeconds: number;
+  completed: boolean;
+  canUndo: boolean;
+  history: { row: number; col: number; prevValue: number; prevNotes: number[] }[];
+}

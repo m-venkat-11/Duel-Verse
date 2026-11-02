@@ -11,6 +11,9 @@ import { createTankDuelInitialState } from './tankDuelEngine';
 import { createSlapDuelInitialState } from './slapDuelEngine';
 import { createKnifeMasterInitialState } from './knifeMasterEngine';
 import { createSumoSpinInitialState } from './sumoSpinEngine';
+import { createFlappySpideyInitialState } from './flappySpideyEngine';
+import { createCyber2048InitialState } from './cyber2048Engine';
+import { createCyberSudokuInitialState } from './cyberSudokuEngine';
 
 export function initializeGameState(gameId: string, playerUids: string[], targetScore: number = 3): any {
   switch (gameId) {
@@ -40,6 +43,12 @@ export function initializeGameState(gameId: string, playerUids: string[], target
       return createKnifeMasterInitialState(playerUids, targetScore);
     case 'sumospin':
       return createSumoSpinInitialState(playerUids, targetScore);
+    case 'flappyspidey':
+      return createFlappySpideyInitialState(playerUids, targetScore);
+    case 'cyber2048':
+      return createCyber2048InitialState();
+    case 'cybersudoku':
+      return createCyberSudokuInitialState('casual');
     default:
       return createTicTacToeInitialState(playerUids);
   }
@@ -58,3 +67,7 @@ export * from './tankDuelEngine';
 export * from './slapDuelEngine';
 export * from './knifeMasterEngine';
 export * from './sumoSpinEngine';
+export * from './flappySpideyEngine';
+export * from './cyber2048Engine';
+export * from './cyberSudokuEngine';
+
