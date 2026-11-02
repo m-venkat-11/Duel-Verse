@@ -35,7 +35,7 @@ export const MemoryMatchView: React.FC<MemoryMatchViewProps> = ({
   const matchedByOp = opScore;
 
   return (
-    <div className="w-full max-w-xl mx-auto flex flex-col items-center select-none gap-3">
+    <div className="w-full max-w-2xl mx-auto flex flex-col items-center select-none gap-3">
       {/* Score HUD */}
       <div className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-slate-900/90 border border-slate-700/60 shadow-xl">
         <div className="flex-1 text-center">

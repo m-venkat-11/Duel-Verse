@@ -84,7 +84,7 @@ export const ReactionRushView: React.FC<ReactionRushViewProps> = ({
   const target = gameState.targetWins || 3;
 
   return (
-    <div className="w-full max-w-xl mx-auto flex flex-col items-center select-none gap-3 px-2">
+    <div className="w-full max-w-2xl mx-auto flex flex-col items-center select-none gap-3 px-2">
       {/* Win strips at top */}
       <div className="flex items-center justify-between w-full text-xs font-black font-mono">
         <div className="flex items-center gap-1.5">

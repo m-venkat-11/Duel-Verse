@@ -66,7 +66,7 @@ export const NumberBlitzView: React.FC<NumberBlitzViewProps> = ({
   }
 
   return (
-    <div className="w-full max-w-xl mx-auto flex flex-col items-center select-none gap-3">
+    <div className="w-full max-w-2xl mx-auto flex flex-col items-center select-none gap-3">
       {/* HUD: timer + score + rival */}
       <div className="w-full flex items-center gap-2">
         {/* Timer ring */}

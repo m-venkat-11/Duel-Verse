@@ -451,7 +451,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
   const p2Score = gameState.scores?.[p2Uid] || 0;
 
   return (
-    <div ref={containerRef} className="w-full max-w-xl mx-auto flex flex-col items-center select-none gap-2.5 px-2">
+    <div ref={containerRef} className="w-full max-w-2xl mx-auto flex flex-col items-center select-none gap-2.5 px-2">
       {/* Top Score HUD */}
       <div className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl bg-slate-900/90 border border-slate-700/60 text-xs font-black font-mono shadow-md backdrop-blur-md">
         <div className="flex items-center gap-2">

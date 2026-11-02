@@ -72,7 +72,7 @@ export const TicTacToeView: React.FC<TicTacToeViewProps> = ({
   }
 
   return (
-    <div className="w-full max-w-lg mx-auto flex flex-col items-center select-none gap-3 px-2">
+    <div className="w-full max-w-xl mx-auto flex flex-col items-center select-none gap-3 px-2">
       {/* Game Mode Title & Rule */}
       <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-600/20 text-violet-300 border border-violet-500/40 text-[11px] font-mono">
         <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />

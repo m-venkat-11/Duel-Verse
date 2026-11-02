@@ -227,7 +227,7 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({
   const targetScore = room.maxRounds || gameState.targetScore || 5;
 
   return (
-    <div className={`w-full max-w-lg mx-auto flex flex-col items-center select-none gap-3 px-2 transition-colors duration-100 ${
+    <div className={`w-full max-w-2xl mx-auto flex flex-col items-center select-none gap-3 px-2 transition-colors duration-100 ${
       screenFlash ? 'bg-rose-950/40' : ''
     }`}>
       {/* Top HUD Score Header */}

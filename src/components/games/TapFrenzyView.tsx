@@ -151,7 +151,7 @@ export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({
   const targetWins = room.maxRounds || gameState.targetWins || 3;
 
   return (
-    <div className="w-full max-w-xl mx-auto flex flex-col items-center select-none gap-3 px-2">
+    <div className="w-full max-w-2xl mx-auto flex flex-col items-center select-none gap-3 px-2">
       {/* Target Wins & Round Status Bar */}
       <div className="w-full flex items-center justify-between px-4 py-2 rounded-2xl bg-slate-900/90 border border-slate-700/60 text-xs font-black font-mono shadow-md backdrop-blur-md">
         <div className="flex items-center gap-2">

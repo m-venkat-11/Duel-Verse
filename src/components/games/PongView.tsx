@@ -621,7 +621,7 @@ export const PongView: React.FC<PongViewProps> = ({
   }, [isHost, bottomUid, topUid, isBottomPlayer, isBotPlaying, p1Nickname, p2Nickname, onDispatchAction]);
 
   return (
-    <div className="w-full max-w-lg md:max-w-xl mx-auto flex flex-col items-center select-none gap-2 px-2">
+    <div className="w-full max-w-2xl mx-auto flex flex-col items-center select-none gap-2 px-2">
       {/* Top Player (Opponent) HUD Bar */}
       <div className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl bg-slate-900/80 border border-rose-500/40 text-xs font-black font-mono shadow-xl backdrop-blur-md">
         <div className="flex items-center gap-2.5">

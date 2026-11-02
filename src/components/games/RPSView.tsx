@@ -72,7 +72,7 @@ export const RPSView: React.FC<RPSViewProps> = ({
   const isDraw = gameState.roundWinner === 'draw';
 
   return (
-    <div className="w-full max-w-xl mx-auto flex flex-col items-center select-none gap-3 px-2">
+    <div className="w-full max-w-2xl mx-auto flex flex-col items-center select-none gap-3 px-2">
       {/* Round & Target Counter */}
       <div className="flex items-center gap-3 text-xs font-black font-mono text-slate-400 bg-slate-900/60 px-4 py-1.5 rounded-full border border-white/10 shadow-inner">
         <span className="text-violet-400">ROUND {gameState.roundNumber || 1}</span>

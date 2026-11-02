@@ -144,7 +144,7 @@ export const ArenaStage: React.FC<ArenaStageProps> = ({
       <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         
         {/* LEFT FLANK: Player Command Station (Hidden on small screens) */}
-        <div className="hidden lg:flex lg:col-span-3 flex-col gap-3 shrink-0">
+        <div className="hidden lg:flex lg:col-span-2 flex-col gap-3 shrink-0">
           {/* Player Battle Card */}
           <div className="rounded-3xl bg-slate-950/80 border border-white/10 p-4 shadow-xl backdrop-blur-md">
             <div className="flex items-center gap-3 mb-3">
@@ -225,7 +225,7 @@ export const ArenaStage: React.FC<ArenaStageProps> = ({
         </div>
 
         {/* CENTER COLUMN: The Active Game Stage (Expanded & Tactile) */}
-        <div className="lg:col-span-6 w-full flex flex-col items-center justify-center min-h-[480px]">
+        <div className="lg:col-span-8 w-full flex flex-col items-center justify-center min-h-[480px]">
           <div className="w-full flex flex-col items-center">
             {children}
           </div>
@@ -309,7 +309,7 @@ export const ArenaStage: React.FC<ArenaStageProps> = ({
         </div>
 
         {/* RIGHT FLANK: CyberBot AI Core / Opponent Station (Hidden on small screens) */}
-        <div className="hidden lg:flex lg:col-span-3 flex-col gap-3 shrink-0">
+        <div className="hidden lg:flex lg:col-span-2 flex-col gap-3 shrink-0">
           <div className="rounded-3xl bg-slate-950/80 border border-cyan-500/20 p-4 shadow-xl backdrop-blur-md relative overflow-hidden">
             {/* Ambient cyber glow */}
             <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
