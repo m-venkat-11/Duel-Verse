@@ -328,7 +328,7 @@ export function App() {
       const newUrl = `${window.location.pathname}?room=${newRoomId}`;
       window.history.pushState({ room: newRoomId }, '', newUrl);
 
-      const isSoloGame = getGameMetadata(gameId)?.category === 'solo';
+      const isSoloGame = getGameMetadata(gameId)?.category === 'solo' || gameId === 'flappyspidey' || gameId === 'cyber2048' || gameId === 'cybersudoku';
       if (isSoloGame) {
         // Solo Arcade games start immediately with 0 waiting and no bot
         await activeTransport.startGame(newRoomId);

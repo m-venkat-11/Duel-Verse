@@ -52,7 +52,7 @@ export const ArenaStage: React.FC<ArenaStageProps> = ({
     setTimeout(() => setActiveTaunt(null), 2000);
   };
 
-  if (game.category === 'solo') {
+  if (game.category === 'solo' || game.id === 'flappyspidey' || game.id === 'cyber2048' || game.id === 'cybersudoku') {
     return (
       <div className="w-full max-w-4xl mx-auto flex flex-col items-center px-2 sm:px-4">
         {/* Solo Top Header */}

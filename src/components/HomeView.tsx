@@ -37,7 +37,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const handleOpenSetup = (gameId: string = 'tankduel', withBot: boolean = false) => {
     soundService.playClick();
     const g = GAMES_CATALOG.find((item) => item.id === gameId) || GAMES_CATALOG[0];
-    if (g.category === 'solo') {
+    if (g.category === 'solo' || g.id === 'flappyspidey' || g.id === 'cyber2048' || g.id === 'cybersudoku') {
       // Solo games launch immediately! No 2-player setup modal, no friend invite, no bot!
       onCreateRoom(g.id, 1, false);
       return;

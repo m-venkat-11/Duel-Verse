@@ -80,7 +80,7 @@ export const GameCard: React.FC<GameCardProps> = ({
 
         {/* Footer Meta & Action Row */}
         <div className="mt-3 pt-2.5 border-t border-white/5 flex items-center justify-between gap-2">
-          {game.category === 'solo' ? (
+          {game.category === 'solo' || game.id === 'flappyspidey' || game.id === 'cyber2048' || game.id === 'cybersudoku' ? (
             <button
               onClick={() => {
                 soundService.playClick();
