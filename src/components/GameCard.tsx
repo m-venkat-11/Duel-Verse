@@ -78,31 +78,46 @@ export const GameCard: React.FC<GameCardProps> = ({
           </p>
         </div>
 
-        {/* Footer Meta & Dual Action Row */}
+        {/* Footer Meta & Action Row */}
         <div className="mt-3 pt-2.5 border-t border-white/5 flex items-center justify-between gap-2">
-          {onPlayVsAi && (
+          {game.category === 'solo' ? (
             <button
-              onClick={(e) => {
-                e.stopPropagation();
+              onClick={() => {
                 soundService.playClick();
-                onPlayVsAi(game.id);
+                onSelect(game.id);
               }}
-              className="flex-1 py-2.5 px-3 min-h-[40px] rounded-xl bg-cyan-500/15 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 hover:text-white font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm"
+              className="w-full py-2.5 px-3 min-h-[42px] rounded-xl bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 border border-violet-400/60 text-white font-mono font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-lg shadow-violet-600/30"
             >
-              <span>🤖 VS BOT</span>
+              <span>🕹️ PLAY SOLO</span>
+              <Play className="w-3.5 h-3.5 fill-current" />
             </button>
-          )}
+          ) : (
+            <>
+              {onPlayVsAi && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    soundService.playClick();
+                    onPlayVsAi(game.id);
+                  }}
+                  className="flex-1 py-2.5 px-3 min-h-[40px] rounded-xl bg-cyan-500/15 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 hover:text-white font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm"
+                >
+                  <span>🤖 VS BOT</span>
+                </button>
+              )}
 
-          <button
-            onClick={() => {
-              soundService.playClick();
-              onSelect(game.id);
-            }}
-            className="flex-1 py-2.5 px-3 min-h-[40px] rounded-xl bg-violet-600/30 hover:bg-violet-600/50 border border-violet-400/50 text-white font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md shadow-violet-500/20"
-          >
-            <span>⚔️ 2P ROOM</span>
-            <Play className="w-3 h-3 fill-current" />
-          </button>
+              <button
+                onClick={() => {
+                  soundService.playClick();
+                  onSelect(game.id);
+                }}
+                className="flex-1 py-2.5 px-3 min-h-[40px] rounded-xl bg-violet-600/30 hover:bg-violet-600/50 border border-violet-400/50 text-white font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md shadow-violet-500/20"
+              >
+                <span>⚔️ 2P ROOM</span>
+                <Play className="w-3 h-3 fill-current" />
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

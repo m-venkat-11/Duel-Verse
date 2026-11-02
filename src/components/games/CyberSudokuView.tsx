@@ -210,7 +210,11 @@ export const CyberSudokuView: React.FC<CyberSudokuViewProps> = () => {
               <button
                 key={`${r}-${c}`}
                 onClick={() => setSelectedCell({ r, c })}
-                className={`relative flex items-center justify-center font-['Outfit'] font-black transition-all duration-75 select-none rounded-[4px] ${borderR} ${borderB} ${
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  setSelectedCell({ r, c });
+                }}
+                className={`relative flex items-center justify-center font-['Outfit'] font-black transition-all duration-75 select-none rounded-[4px] touch-none ${borderR} ${borderB} ${
                   isSelected
                     ? 'bg-cyan-500 text-slate-950 font-black shadow-[0_0_15px_#06b6d4] scale-105 z-10'
                     : cell.error
@@ -279,9 +283,15 @@ export const CyberSudokuView: React.FC<CyberSudokuViewProps> = () => {
       </div>
 
       {/* Action Toolbar: Undo, Erase, Notes Mode, Hint */}
-      <div className="w-full max-w-[440px] grid grid-cols-4 gap-2 pt-1 font-mono text-xs">
+      <div className="w-full max-w-[440px] grid grid-cols-4 gap-2 pt-1 font-mono text-xs touch-none select-none">
         <button
           onClick={handleUndo}
+          onTouchStart={(e) => {
+            if (gameState.canUndo) {
+              e.preventDefault();
+              handleUndo();
+            }
+          }}
           disabled={!gameState.canUndo}
           className={`py-2 px-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition ${
             gameState.canUndo
@@ -295,6 +305,10 @@ export const CyberSudokuView: React.FC<CyberSudokuViewProps> = () => {
 
         <button
           onClick={() => handleInputNumber(0)}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            handleInputNumber(0);
+          }}
           className="py-2 px-3 rounded-xl bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white flex flex-col items-center justify-center gap-1 transition active:scale-95 shadow-sm"
         >
           <Eraser className="w-4 h-4" />
@@ -303,6 +317,10 @@ export const CyberSudokuView: React.FC<CyberSudokuViewProps> = () => {
 
         <button
           onClick={() => setIsNoteMode((prev) => !prev)}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            setIsNoteMode((prev) => !prev);
+          }}
           className={`py-2 px-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition active:scale-95 shadow-sm ${
             isNoteMode
               ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 font-bold shadow-[0_0_10px_rgba(6,182,212,0.3)]'
@@ -315,6 +333,10 @@ export const CyberSudokuView: React.FC<CyberSudokuViewProps> = () => {
 
         <button
           onClick={handleHint}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            handleHint();
+          }}
           className="py-2 px-3 rounded-xl bg-slate-900 border border-amber-500/40 hover:border-amber-400 text-amber-300 flex flex-col items-center justify-center gap-1 transition active:scale-95 shadow-sm"
         >
           <Lightbulb className="w-4 h-4" />
@@ -323,15 +345,21 @@ export const CyberSudokuView: React.FC<CyberSudokuViewProps> = () => {
       </div>
 
       {/* Tactile Keypad (Numbers 1 through 9) */}
-      <div className="w-full max-w-[440px] grid grid-cols-9 gap-1.5 pt-1">
+      <div className="w-full max-w-[440px] grid grid-cols-9 gap-1 sm:gap-1.5 pt-1 touch-none select-none">
         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
           const isCompleted = (numberCounts[num] || 0) >= 9;
           return (
             <button
               key={num}
               onClick={() => handleInputNumber(num)}
+              onTouchStart={(e) => {
+                if (!isCompleted) {
+                  e.preventDefault();
+                  handleInputNumber(num);
+                }
+              }}
               disabled={isCompleted}
-              className={`h-12 rounded-xl flex flex-col items-center justify-center font-['Outfit'] font-black text-lg transition active:scale-90 border ${
+              className={`h-11 sm:h-12 rounded-xl flex flex-col items-center justify-center font-['Outfit'] font-black text-base sm:text-lg transition active:scale-90 border ${
                 isCompleted
                   ? 'bg-slate-950 border-slate-900 text-slate-700 cursor-not-allowed opacity-40'
                   : 'bg-slate-900 hover:bg-slate-800 border-slate-700 hover:border-cyan-400 text-white shadow-md'
@@ -345,6 +373,7 @@ export const CyberSudokuView: React.FC<CyberSudokuViewProps> = () => {
           );
         })}
       </div>
+
 
       <p className="text-xs text-slate-400 font-mono text-center">
         ⌨️ Desktop: 1-9 to Enter • N for Notes • Arrow keys to navigate

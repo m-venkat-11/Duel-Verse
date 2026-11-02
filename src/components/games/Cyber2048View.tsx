@@ -212,8 +212,9 @@ export const Cyber2048View: React.FC<Cyber2048ViewProps> = () => {
       {/* 4×4 Matrix Grid Board */}
       <div
         onTouchStart={handleTouchStart}
+        onTouchMove={(e) => e.preventDefault()}
         onTouchEnd={handleTouchEnd}
-        className="w-full aspect-square max-w-[440px] p-3 sm:p-4 rounded-3xl bg-slate-950 border-2 border-violet-500/40 shadow-2xl grid grid-cols-4 grid-rows-4 gap-2.5 sm:gap-3 relative overflow-hidden touch-none"
+        className="w-full aspect-square max-w-[420px] p-2.5 sm:p-4 rounded-3xl bg-slate-950 border-2 border-violet-500/40 shadow-2xl grid grid-cols-4 grid-rows-4 gap-2 sm:gap-3 relative overflow-hidden touch-none select-none"
         style={{
           boxShadow: '0 0 50px rgba(139, 92, 246, 0.25), inset 0 2px 6px rgba(255, 255, 255, 0.08)'
         }}
@@ -301,29 +302,45 @@ export const Cyber2048View: React.FC<Cyber2048ViewProps> = () => {
       </div>
 
       {/* Tactile On-Screen D-Pad for Mobile Swipe Alternative */}
-      <div className="flex sm:hidden flex-col items-center gap-1.5 pt-1">
+      <div className="flex sm:hidden flex-col items-center gap-1.5 pt-1 touch-none select-none">
         <button
           onClick={() => executeMove('up')}
-          className="w-14 h-12 rounded-2xl bg-slate-900 border border-violet-500/30 active:scale-90 flex items-center justify-center text-cyan-300 shadow-md"
+          onTouchStart={(e) => {
+            e.preventDefault();
+            executeMove('up');
+          }}
+          className="w-16 h-12 rounded-2xl bg-slate-900 border border-violet-500/30 active:scale-90 flex items-center justify-center text-cyan-300 shadow-md active:bg-violet-600/30"
         >
           <ArrowUp className="w-6 h-6 stroke-[3]" />
         </button>
         <div className="flex items-center gap-3">
           <button
             onClick={() => executeMove('left')}
-            className="w-14 h-12 rounded-2xl bg-slate-900 border border-violet-500/30 active:scale-90 flex items-center justify-center text-cyan-300 shadow-md"
+            onTouchStart={(e) => {
+              e.preventDefault();
+              executeMove('left');
+            }}
+            className="w-16 h-12 rounded-2xl bg-slate-900 border border-violet-500/30 active:scale-90 flex items-center justify-center text-cyan-300 shadow-md active:bg-violet-600/30"
           >
             <ArrowLeft className="w-6 h-6 stroke-[3]" />
           </button>
           <button
             onClick={() => executeMove('down')}
-            className="w-14 h-12 rounded-2xl bg-slate-900 border border-violet-500/30 active:scale-90 flex items-center justify-center text-cyan-300 shadow-md"
+            onTouchStart={(e) => {
+              e.preventDefault();
+              executeMove('down');
+            }}
+            className="w-16 h-12 rounded-2xl bg-slate-900 border border-violet-500/30 active:scale-90 flex items-center justify-center text-cyan-300 shadow-md active:bg-violet-600/30"
           >
             <ArrowDown className="w-6 h-6 stroke-[3]" />
           </button>
           <button
             onClick={() => executeMove('right')}
-            className="w-14 h-12 rounded-2xl bg-slate-900 border border-violet-500/30 active:scale-90 flex items-center justify-center text-cyan-300 shadow-md"
+            onTouchStart={(e) => {
+              e.preventDefault();
+              executeMove('right');
+            }}
+            className="w-16 h-12 rounded-2xl bg-slate-900 border border-violet-500/30 active:scale-90 flex items-center justify-center text-cyan-300 shadow-md active:bg-violet-600/30"
           >
             <ArrowRight className="w-6 h-6 stroke-[3]" />
           </button>

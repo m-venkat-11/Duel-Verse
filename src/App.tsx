@@ -5,6 +5,7 @@ import { activeTransport } from './services/transport';
 import type { AuthoritativeRoomState } from './types/room';
 
 import { Header } from './components/Header';
+import { getGameMetadata } from './config/games';
 import { HomeView } from './components/HomeView';
 import { LobbyView } from './components/LobbyView';
 import { Scoreboard } from './components/Scoreboard';
@@ -327,7 +328,11 @@ export function App() {
       const newUrl = `${window.location.pathname}?room=${newRoomId}`;
       window.history.pushState({ room: newRoomId }, '', newUrl);
 
-      if (withBot) {
+      const isSoloGame = getGameMetadata(gameId)?.category === 'solo';
+      if (isSoloGame) {
+        // Solo Arcade games start immediately with 0 waiting and no bot
+        await activeTransport.startGame(newRoomId);
+      } else if (withBot) {
         const botPlayer = {
           uid: 'bot_rival',
           nickname: 'CyberBot ⚡',

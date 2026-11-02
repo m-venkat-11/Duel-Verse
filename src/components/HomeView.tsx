@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, ArrowRight, Users, Flame, Gamepad2, HelpCircle, Swords, Zap, Sparkles, X, Trophy, Minus, Bot } from 'lucide-react';
+import { Plus, ArrowRight, Users, Flame, Gamepad2, HelpCircle, Swords, Zap, Sparkles, X, Trophy, Minus, Bot, Play } from 'lucide-react';
 import { GAMES_CATALOG, type GameCategory, type GameMetadata } from '../config/games';
 import { GameCard } from './GameCard';
 import { GameArtwork } from './artwork/GameArtwork';
@@ -37,6 +37,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const handleOpenSetup = (gameId: string = 'tankduel', withBot: boolean = false) => {
     soundService.playClick();
     const g = GAMES_CATALOG.find((item) => item.id === gameId) || GAMES_CATALOG[0];
+    if (g.category === 'solo') {
+      // Solo games launch immediately! No 2-player setup modal, no friend invite, no bot!
+      onCreateRoom(g.id, 1, false);
+      return;
+    }
     setSetupGame(g);
     setSetupWithBot(withBot);
     setSetupPoints(3);
@@ -403,104 +408,127 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </div>
             </div>
 
-            {/* Opponent Mode Selector */}
-            <div className="mb-4">
-              <span className="text-xs font-mono text-slate-400 uppercase font-bold block mb-2">
-                Choose Rival Mode:
-              </span>
-              <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  onClick={() => { soundService.playClick(); setSetupWithBot(false); }}
-                  className={`p-3 rounded-2xl border text-xs font-black font-['Outfit'] flex items-center justify-center gap-2 transition ${
-                    !setupWithBot
-                      ? 'bg-rose-600/30 border-rose-500 text-white shadow-lg shadow-rose-600/20'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Users className="w-4 h-4 text-rose-400" />
-                  <span>Play with Friend</span>
-                </button>
-                <button
-                  onClick={() => { soundService.playClick(); setSetupWithBot(true); }}
-                  className={`p-3 rounded-2xl border text-xs font-black font-['Outfit'] flex items-center justify-center gap-2 transition ${
-                    setupWithBot
-                      ? 'bg-cyan-600/30 border-cyan-500 text-white shadow-lg shadow-cyan-600/20'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Bot className="w-4 h-4 text-cyan-400" />
-                  <span>Play vs CyberBot</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Win Condition / Points Customization */}
-            <div className="mb-5 p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-mono text-slate-300 uppercase font-bold flex items-center gap-1.5">
-                  <Trophy className="w-4 h-4 text-amber-400" />
-                  Points to Win Match:
+            {setupGame.category === 'solo' ? (
+              <div className="mb-5 p-4 rounded-2xl bg-slate-900/90 border border-violet-500/40 text-center">
+                <span className="text-sm font-black font-['Outfit'] text-violet-300 block mb-1">
+                  🕹️ SINGLE PLAYER ARCADE RUN
                 </span>
-                <span className="text-sm font-black font-mono text-amber-400">
-                  First to {setupPoints}
-                </span>
+                <p className="text-xs text-slate-400 font-mono">
+                  This game is an exclusive solo high-score challenge. No rival or bot needed!
+                </p>
               </div>
-
-              {/* Stepper + Presets */}
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <button
-                  onClick={() => {
-                    soundService.playClick();
-                    setSetupPoints(Math.max(1, setupPoints - 1));
-                  }}
-                  disabled={setupPoints <= 1}
-                  className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white flex items-center justify-center font-black border border-slate-700 active:scale-95 transition"
-                >
-                  <Minus className="w-4 h-4" />
-                </button>
-                <div className="flex-1 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-center font-mono font-black text-amber-300 text-base">
-                  {setupPoints} {setupPoints === 1 ? 'POINT' : 'POINTS'}
+            ) : (
+              <>
+                {/* Opponent Mode Selector */}
+                <div className="mb-4">
+                  <span className="text-xs font-mono text-slate-400 uppercase font-bold block mb-2">
+                    Choose Rival Mode:
+                  </span>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      onClick={() => { soundService.playClick(); setSetupWithBot(false); }}
+                      className={`p-3 rounded-2xl border text-xs font-black font-['Outfit'] flex items-center justify-center gap-2 transition ${
+                        !setupWithBot
+                          ? 'bg-rose-600/30 border-rose-500 text-white shadow-lg shadow-rose-600/20'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Users className="w-4 h-4 text-rose-400" />
+                      <span>Play with Friend</span>
+                    </button>
+                    <button
+                      onClick={() => { soundService.playClick(); setSetupWithBot(true); }}
+                      className={`p-3 rounded-2xl border text-xs font-black font-['Outfit'] flex items-center justify-center gap-2 transition ${
+                        setupWithBot
+                          ? 'bg-cyan-600/30 border-cyan-500 text-white shadow-lg shadow-cyan-600/20'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Bot className="w-4 h-4 text-cyan-400" />
+                      <span>Play vs CyberBot</span>
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={() => {
-                    soundService.playClick();
-                    setSetupPoints(Math.min(15, setupPoints + 1));
-                  }}
-                  disabled={setupPoints >= 15}
-                  className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white flex items-center justify-center font-black border border-slate-700 active:scale-95 transition"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
 
-              {/* Quick Pills */}
-              <div className="grid grid-cols-4 gap-2">
-                {[1, 3, 5, 10].map((pts) => (
-                  <button
-                    key={pts}
-                    onClick={() => { soundService.playClick(); setSetupPoints(pts); }}
-                    className={`py-1.5 rounded-xl text-xs font-bold font-mono transition ${
-                      setupPoints === pts
-                        ? 'bg-amber-500 text-slate-950 font-black shadow-md'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
-                  >
-                    {pts === 1 ? '⚡ 1 Pt' : `${pts} Pts`}
-                  </button>
-                ))}
-              </div>
-            </div>
+                {/* Win Condition / Points Customization */}
+                <div className="mb-5 p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-mono text-slate-300 uppercase font-bold flex items-center gap-1.5">
+                      <Trophy className="w-4 h-4 text-amber-400" />
+                      Points to Win Match:
+                    </span>
+                    <span className="text-sm font-black font-mono text-amber-400">
+                      First to {setupPoints}
+                    </span>
+                  </div>
+
+                  {/* Stepper + Presets */}
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <button
+                      onClick={() => {
+                        soundService.playClick();
+                        setSetupPoints(Math.max(1, setupPoints - 1));
+                      }}
+                      disabled={setupPoints <= 1}
+                      className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white flex items-center justify-center font-black border border-slate-700 active:scale-95 transition"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </button>
+                    <div className="flex-1 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-center font-mono font-black text-amber-300 text-base">
+                      {setupPoints} {setupPoints === 1 ? 'POINT' : 'POINTS'}
+                    </div>
+                    <button
+                      onClick={() => {
+                        soundService.playClick();
+                        setSetupPoints(Math.min(15, setupPoints + 1));
+                      }}
+                      disabled={setupPoints >= 15}
+                      className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white flex items-center justify-center font-black border border-slate-700 active:scale-95 transition"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Quick Pills */}
+                  <div className="grid grid-cols-4 gap-2">
+                    {[1, 3, 5, 10].map((pts) => (
+                      <button
+                        key={pts}
+                        onClick={() => { soundService.playClick(); setSetupPoints(pts); }}
+                        className={`py-1.5 rounded-xl text-xs font-bold font-mono transition ${
+                          setupPoints === pts
+                            ? 'bg-amber-500 text-slate-950 font-black shadow-md'
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        }`}
+                      >
+                        {pts === 1 ? '⚡ 1 Pt' : `${pts} Pts`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* Launch Action */}
             <button
               onClick={handleLaunchDuel}
               className="w-full btn-arcade btn-arcade-rose py-4 text-base font-black flex items-center justify-center gap-2 shadow-2xl active:scale-95 transition"
             >
-              <Swords className="w-5 h-5 stroke-[2.5]" />
-              <span>ENTER ARENA (FIRST TO {setupPoints})</span>
+              {setupGame.category === 'solo' ? (
+                <>
+                  <Play className="w-5 h-5 fill-current" />
+                  <span>START SOLO RUN</span>
+                </>
+              ) : (
+                <>
+                  <Swords className="w-5 h-5 stroke-[2.5]" />
+                  <span>ENTER ARENA (FIRST TO {setupPoints})</span>
+                </>
+              )}
             </button>
           </div>
         </div>
+
       )}
     </div>
   );

@@ -40,12 +40,13 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
 
     const W = 460;
     const H = 600;
-    const SPIDEY_X = 110;
+    const SPIDEY_X = 100;
     const SPIDEY_RADIUS = 16;
-    const GRAVITY = 0.44;
-    const FLAP_FORCE = -7.4;
-    const OBSTACLE_SPEED = 2.8;
-    const OBSTACLE_GAP = 145;
+    const HITBOX_RADIUS = 9; // Forgiving collision core (prevents cheap deaths)
+    const GRAVITY = 0.24; // Smooth gentle floatiness (reduced from harsh 0.44)
+    const FLAP_FORCE = -5.4; // Controlled, smooth web impulse (reduced from 7.4)
+    const OBSTACLE_SPEED = 1.85; // Relaxed arcade scrolling speed (reduced from fast 2.8)
+    const OBSTACLE_GAP = 205; // Generous clear passage (expanded from 145)
 
     // Simulation State
     let phase: 'ready' | 'playing' | 'gameover' = 'ready';
@@ -56,7 +57,6 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
     let currentScore = 0;
 
     let obstacles: SpideyObstacle[] = [];
-    let nextObstacleX = 480;
     let skylineOffset = 0;
     let timeElapsed = 0;
 
@@ -64,13 +64,13 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
       const minTop = 60;
       const maxTop = H - OBSTACLE_GAP - 90;
       const topHeight = Math.floor(minTop + Math.random() * (maxTop - minTop));
-      const hasReactor = Math.random() < 0.45;
+      const hasReactor = Math.random() < 0.6; // High chance of Stark Reactor bonuses
       const reactorY = topHeight + OBSTACLE_GAP / 2;
 
       obstacles.push({
         id: Math.random().toString(),
         x: xPos,
-        width: 62,
+        width: 58,
         topHeight,
         gap: OBSTACLE_GAP,
         passed: false,
@@ -89,11 +89,11 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
       currentScore = 0;
       setScore(0);
       obstacles = [];
-      nextObstacleX = 460;
       setGameStatePhase('playing');
-      spawnObstacle(460);
-      spawnObstacle(680);
-      spawnObstacle(900);
+      // Generous obstacle spacing (320px apart)
+      spawnObstacle(520);
+      spawnObstacle(840);
+      spawnObstacle(1160);
       soundService.playCountdown(0);
     };
 
@@ -177,26 +177,26 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
             }
           }
 
-          // Check Stark Arc Reactor collection
+          // Check Stark Arc Reactor collection (Generous magnet range)
           if (obs.hasReactor && !obs.reactorCollected && obs.reactorY) {
             const rx = obs.x + obs.width / 2;
             const ry = obs.reactorY;
             const dist = Math.hypot(SPIDEY_X - rx, spideyY - ry);
-            if (dist < SPIDEY_RADIUS + 16) {
+            if (dist < SPIDEY_RADIUS + 22) {
               obs.reactorCollected = true;
               currentScore += 3;
               setScore(currentScore);
               juice.playSound('goal');
-              juice.addTrauma(0.2);
+              juice.addTrauma(0.18);
               juice.emitSparks(rx, ry, 16, '#facc15', '#fbbf24', 4.5);
             }
           }
 
-          // Collision detection with electro towers
-          const inXWindow = SPIDEY_X + SPIDEY_RADIUS > obs.x && SPIDEY_X - SPIDEY_RADIUS < obs.x + obs.width;
+          // Collision detection with electro towers using forgiving HITBOX_RADIUS
+          const inXWindow = SPIDEY_X + HITBOX_RADIUS > obs.x && SPIDEY_X - HITBOX_RADIUS < obs.x + obs.width;
           if (inXWindow) {
-            const hitTop = spideyY - SPIDEY_RADIUS < obs.topHeight;
-            const hitBottom = spideyY + SPIDEY_RADIUS > obs.topHeight + obs.gap;
+            const hitTop = spideyY - HITBOX_RADIUS < obs.topHeight;
+            const hitBottom = spideyY + HITBOX_RADIUS > obs.topHeight + obs.gap;
             if (hitTop || hitBottom) {
               handleCrash();
               return;
@@ -204,10 +204,10 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
           }
         }
 
-        // Clean up off-screen obstacles and spawn next
+        // Clean up off-screen obstacles and spawn next (Spaced out by 320px)
         obstacles = obstacles.filter((obs) => obs.x + obs.width > -50);
         const lastObs = obstacles[obstacles.length - 1];
-        if (lastObs && lastObs.x < W - 180) {
+        if (lastObs && lastObs.x < W - 260) {
           spawnObstacle(W + 60);
         }
       }
@@ -480,6 +480,10 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
       {/* Main Flappy Spidey Canvas Stage */}
       <div
         onClick={() => handleFlapRef.current()}
+        onTouchStart={(e) => {
+          e.preventDefault();
+          handleFlapRef.current();
+        }}
         className="w-full aspect-[3/4] h-[60vh] min-h-[440px] max-h-[620px] rounded-3xl overflow-hidden shadow-2xl border-4 border-rose-500/40 cursor-pointer touch-none select-none relative bg-slate-950"
         style={{
           boxShadow: '0 0 50px rgba(225, 29, 72, 0.25), 0 25px 70px rgba(0, 0, 0, 0.8)'
@@ -531,7 +535,12 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
                 e.stopPropagation();
                 handleFlapRef.current();
               }}
-              className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-rose-500 to-amber-500 text-slate-950 font-black font-['Outfit'] text-lg flex items-center gap-2 shadow-2xl active:scale-95 transition"
+              onTouchStart={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleFlapRef.current();
+              }}
+              className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-rose-500 to-amber-500 text-slate-950 font-black font-['Outfit'] text-lg flex items-center gap-2 shadow-2xl active:scale-95 transition touch-none select-none"
             >
               <RotateCcw className="w-5 h-5 stroke-[2.5]" />
               <span>SWING AGAIN</span>
@@ -544,7 +553,11 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
       <div className="w-full max-w-md pt-1">
         <button
           onClick={() => handleFlapRef.current()}
-          className="w-full h-16 rounded-2xl bg-gradient-to-r from-rose-600 via-red-500 to-amber-500 border-2 border-rose-300 text-white font-black font-['Outfit'] text-xl active:scale-95 shadow-2xl shadow-rose-600/30 flex items-center justify-center gap-2"
+          onTouchStart={(e) => {
+            e.preventDefault();
+            handleFlapRef.current();
+          }}
+          className="w-full h-16 rounded-2xl bg-gradient-to-r from-rose-600 via-red-500 to-amber-500 border-2 border-rose-300 text-white font-black font-['Outfit'] text-xl active:scale-95 shadow-2xl shadow-rose-600/30 flex items-center justify-center gap-2 touch-none select-none"
         >
           <Sparkles className="w-6 h-6 fill-current text-amber-300" />
           <span>THWIP! SWING WEB</span>

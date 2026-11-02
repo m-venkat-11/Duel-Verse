@@ -52,6 +52,70 @@ export const ArenaStage: React.FC<ArenaStageProps> = ({
     setTimeout(() => setActiveTaunt(null), 2000);
   };
 
+  if (game.category === 'solo') {
+    return (
+      <div className="w-full max-w-4xl mx-auto flex flex-col items-center px-2 sm:px-4">
+        {/* Solo Top Header */}
+        <div className="w-full mb-3 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border border-white/10 p-2 sm:p-3 shadow-2xl backdrop-blur-xl flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-violet-500/20 border-2 border-violet-400 flex items-center justify-center text-xl shadow-lg shadow-violet-500/20 shrink-0">
+              {p1?.avatarId || '👤'}
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs sm:text-sm font-black text-white truncate font-['Outfit']">
+                  {p1?.nickname || 'Solo Player'}
+                </span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-violet-500/20 text-violet-300 font-bold font-mono border border-violet-500/30">
+                  SOLO
+                </span>
+              </div>
+              <div className="text-[10px] text-cyan-400 font-mono font-bold">
+                HIGH SCORE CHASE
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-center px-2">
+            <span className="px-2.5 py-0.5 rounded-full bg-violet-500/20 border border-violet-400/30 text-[10px] font-black text-violet-300 font-mono tracking-widest uppercase mb-0.5">
+              🕹️ ARCADE MODE
+            </span>
+            <span className="text-xs sm:text-sm font-black text-white font-['Outfit'] tracking-wider">
+              {game.title}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onToggleMute}
+              className={`p-2 sm:px-3 sm:py-2 rounded-xl border flex items-center gap-1.5 text-xs font-bold transition ${
+                isMuted
+                  ? 'bg-rose-500/20 border-rose-500/50 text-rose-300'
+                  : 'bg-slate-900 border-white/10 text-slate-300 hover:text-white'
+              }`}
+            >
+              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              <span className="hidden sm:inline">{isMuted ? 'Muted' : 'Sound'}</span>
+            </button>
+
+            <button
+              onClick={onLeaveRoom}
+              className="p-2 sm:px-3 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/15 text-slate-300 hover:text-white text-xs font-bold font-mono flex items-center gap-1.5 transition active:scale-95"
+            >
+              <Flag className="w-4 h-4 text-amber-400" />
+              <span>Exit</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Solo Center Stage */}
+        <div className="w-full flex flex-col items-center justify-center">
+          {children}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full max-w-7xl mx-auto flex flex-col items-center px-2 sm:px-4 lg:px-6">
       {/* ======================================================== */}
