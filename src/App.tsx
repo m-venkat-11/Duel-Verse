@@ -415,6 +415,10 @@ export function App() {
   // Dispatch game action to authoritative engine
   const handleDispatchAction = useCallback(
     (actionType: string, payload: any, actingUid?: string) => {
+      if (actionType === 'leave') {
+        handleLeaveRoom();
+        return;
+      }
       if (!room) return;
       const effectiveUid = actingUid || payload?.actingUid || payload?.playerUid || profile.uid;
       activeTransport.dispatchAction({

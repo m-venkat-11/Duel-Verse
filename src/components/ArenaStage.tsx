@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Volume2, VolumeX, Flag, Bot, Sparkles, Zap, Shield, Trophy, Flame } from 'lucide-react';
+import { Volume2, VolumeX, Flag, Bot, Sparkles, Zap, Shield, Trophy, Flame, ArrowLeft } from 'lucide-react';
 import type { AuthoritativeRoomState } from '../types/room';
 import type { BotDifficulty } from '../engine/cyberBotAi';
 import { getCyberBotSpeech } from '../engine/cyberBotAi';
@@ -55,56 +55,48 @@ export const ArenaStage: React.FC<ArenaStageProps> = ({
   if (game.category === 'solo' || game.id === 'flappyspidey' || game.id === 'cyber2048' || game.id === 'cybersudoku') {
     return (
       <div className="w-full max-w-4xl mx-auto flex flex-col items-center px-2 sm:px-4">
-        {/* Solo Top Header */}
-        <div className="w-full mb-3 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border border-white/10 p-2 sm:p-3 shadow-2xl backdrop-blur-xl flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-violet-500/20 border-2 border-violet-400 flex items-center justify-center text-xl shadow-lg shadow-violet-500/20 shrink-0">
-              {p1?.avatarId || '👤'}
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs sm:text-sm font-black text-white truncate font-['Outfit']">
-                  {p1?.nickname || 'Solo Player'}
-                </span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-violet-500/20 text-violet-300 font-bold font-mono border border-violet-500/30">
-                  SOLO
-                </span>
-              </div>
-              <div className="text-[10px] text-cyan-400 font-mono font-bold">
-                HIGH SCORE CHASE
-              </div>
-            </div>
-          </div>
+        {/* Solo Top Header with Unmistakable Back Button */}
+        <div className="w-full mb-3 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border border-white/10 p-2 sm:p-2.5 shadow-2xl backdrop-blur-xl flex items-center justify-between gap-2">
+          {/* Unmistakable Back Button */}
+          <button
+            onClick={() => {
+              soundService.playClick();
+              onLeaveRoom();
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-violet-600/30 hover:bg-violet-600/50 border border-violet-400/50 text-white font-['Outfit'] font-black text-xs sm:text-sm active:scale-95 transition shadow-lg shadow-violet-500/20 shrink-0"
+            title="Return to Arcade Library"
+          >
+            <ArrowLeft className="w-4 h-4 text-violet-300 stroke-[3]" />
+            <span>Arcade</span>
+          </button>
 
-          <div className="flex flex-col items-center px-2">
-            <span className="px-2.5 py-0.5 rounded-full bg-violet-500/20 border border-violet-400/30 text-[10px] font-black text-violet-300 font-mono tracking-widest uppercase mb-0.5">
-              🕹️ ARCADE MODE
+          {/* Game Info */}
+          <div className="flex flex-col items-center px-1 min-w-0">
+            <span className="text-[10px] text-amber-400 font-mono font-bold tracking-wider uppercase">
+              🕹️ SOLO RUN
             </span>
-            <span className="text-xs sm:text-sm font-black text-white font-['Outfit'] tracking-wider">
+            <span className="text-xs sm:text-sm font-black text-white font-['Outfit'] tracking-wider truncate max-w-[140px] sm:max-w-none">
               {game.title}
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Controls: Sound + Avatar */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               onClick={onToggleMute}
-              className={`p-2 sm:px-3 sm:py-2 rounded-xl border flex items-center gap-1.5 text-xs font-bold transition ${
+              className={`p-1.5 sm:p-2 rounded-xl border flex items-center gap-1 text-xs font-bold transition shrink-0 ${
                 isMuted
                   ? 'bg-rose-500/20 border-rose-500/50 text-rose-300'
                   : 'bg-slate-900 border-white/10 text-slate-300 hover:text-white'
               }`}
+              title={isMuted ? 'Unmute Sound' : 'Mute Sound'}
             >
               {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-              <span className="hidden sm:inline">{isMuted ? 'Muted' : 'Sound'}</span>
             </button>
 
-            <button
-              onClick={onLeaveRoom}
-              className="p-2 sm:px-3 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/15 text-slate-300 hover:text-white text-xs font-bold font-mono flex items-center gap-1.5 transition active:scale-95"
-            >
-              <Flag className="w-4 h-4 text-amber-400" />
-              <span>Exit</span>
-            </button>
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-violet-500/20 border border-violet-400/50 flex items-center justify-center text-base shadow-sm shrink-0">
+              {p1?.avatarId || '👤'}
+            </div>
           </div>
         </div>
 
@@ -122,7 +114,20 @@ export const ArenaStage: React.FC<ArenaStageProps> = ({
       {/* 1. TOP ARCADE MATCH HEADER                               */}
       {/* ======================================================== */}
       <div className="w-full mb-3 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border border-white/10 p-2 sm:p-3 shadow-2xl backdrop-blur-xl">
-        <div className="flex items-center justify-between gap-2 sm:gap-4">
+        <div className="flex items-center justify-between gap-1.5 sm:gap-4">
+
+          {/* Quick Exit/Surrender Button for Mobile */}
+          <button
+            onClick={() => {
+              soundService.playClick();
+              onLeaveRoom();
+            }}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-violet-600/30 hover:bg-violet-600/50 border border-violet-400/50 text-white font-['Outfit'] font-black text-xs active:scale-95 transition shrink-0 shadow-sm"
+            title="Exit match and return to arcade library"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 text-violet-300 stroke-[3]" />
+            <span className="hidden xs:inline">Arcade</span>
+          </button>
           
           {/* Player 1 Quick Pill */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">

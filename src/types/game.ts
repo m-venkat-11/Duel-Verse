@@ -177,6 +177,7 @@ export interface Cyber2048State {
 
 // --- 16. Cyber Sudoku ---
 export type SudokuDifficulty = 'casual' | 'tactical' | 'hacker' | 'master';
+export type SudokuVariant = 'classic' | 'mini6x6' | 'diagonalX';
 
 export interface SudokuCell {
   row: number;
@@ -186,11 +187,16 @@ export interface SudokuCell {
   initial: boolean;
   notes: number[];
   error?: boolean;
+  isDiagonal?: boolean;
 }
 
 export interface CyberSudokuState {
   grid: SudokuCell[][];
+  size: number;
+  boxRows: number;
+  boxCols: number;
   difficulty: SudokuDifficulty;
+  variant: SudokuVariant;
   mistakes: number;
   maxMistakes: number;
   timeSeconds: number;

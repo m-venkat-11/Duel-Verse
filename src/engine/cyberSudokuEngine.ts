@@ -1,18 +1,24 @@
 export type SudokuDifficulty = 'casual' | 'tactical' | 'hacker' | 'master';
+export type SudokuVariant = 'classic' | 'mini6x6' | 'diagonalX';
 
 export interface SudokuCell {
   row: number;
   col: number;
-  value: number; // 0 = empty, 1..9
+  value: number; // 0 = empty, 1..size
   solution: number;
   initial: boolean;
   notes: number[];
   error?: boolean;
+  isDiagonal?: boolean;
 }
 
 export interface CyberSudokuState {
-  grid: SudokuCell[][]; // 9x9
+  grid: SudokuCell[][]; // 9x9 or 6x6
+  size: number; // 9 or 6
+  boxRows: number; // 3 or 2
+  boxCols: number; // 3
   difficulty: SudokuDifficulty;
+  variant: SudokuVariant;
   mistakes: number;
   maxMistakes: number;
   timeSeconds: number;
@@ -21,29 +27,49 @@ export interface CyberSudokuState {
   history: { row: number; col: number; prevValue: number; prevNotes: number[] }[];
 }
 
-// Generate valid completed 9x9 board using backtracking
-function generateSolution(): number[][] {
-  const board: number[][] = Array(9).fill(0).map(() => Array(9).fill(0));
+// Generate valid completed board using backtracking
+function generateSolution(variant: SudokuVariant): { board: number[][]; size: number; boxRows: number; boxCols: number } {
+  const is6x6 = variant === 'mini6x6';
+  const size = is6x6 ? 6 : 9;
+  const boxRows = is6x6 ? 2 : 3;
+  const boxCols = 3;
+
+  const board: number[][] = Array(size).fill(0).map(() => Array(size).fill(0));
 
   const isValid = (r: number, c: number, num: number): boolean => {
-    for (let i = 0; i < 9; i++) {
+    // Check row and column
+    for (let i = 0; i < size; i++) {
       if (board[r][i] === num || board[i][c] === num) return false;
     }
-    const boxR = Math.floor(r / 3) * 3;
-    const boxC = Math.floor(c / 3) * 3;
-    for (let i = 0; i < 3; i++) {
-      for (let j = 0; j < 3; j++) {
+    // Check box
+    const boxR = Math.floor(r / boxRows) * boxRows;
+    const boxC = Math.floor(c / boxCols) * boxCols;
+    for (let i = 0; i < boxRows; i++) {
+      for (let j = 0; j < boxCols; j++) {
         if (board[boxR + i][boxC + j] === num) return false;
+      }
+    }
+    // Diagonal X check
+    if (variant === 'diagonalX') {
+      if (r === c) {
+        for (let i = 0; i < 9; i++) {
+          if (board[i][i] === num) return false;
+        }
+      }
+      if (r + c === 8) {
+        for (let i = 0; i < 9; i++) {
+          if (board[i][8 - i] === num) return false;
+        }
       }
     }
     return true;
   };
 
   const solve = (): boolean => {
-    for (let r = 0; r < 9; r++) {
-      for (let c = 0; c < 9; c++) {
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
         if (board[r][c] === 0) {
-          const numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5);
+          const numbers = Array.from({ length: size }, (_, i) => i + 1).sort(() => Math.random() - 0.5);
           for (const num of numbers) {
             if (isValid(r, c, num)) {
               board[r][c] = num;
@@ -59,28 +85,45 @@ function generateSolution(): number[][] {
   };
 
   solve();
-  return board;
+  return { board, size, boxRows, boxCols };
 }
 
-export function createCyberSudokuInitialState(difficulty: SudokuDifficulty = 'casual'): CyberSudokuState {
-  const solution = generateSolution();
+export function createCyberSudokuInitialState(
+  difficulty: SudokuDifficulty = 'casual',
+  variant: SudokuVariant = 'classic'
+): CyberSudokuState {
+  const { board: solution, size, boxRows, boxCols } = generateSolution(variant);
 
-  // Number of clues based on difficulty
-  const cluesMap: Record<SudokuDifficulty, number> = {
-    casual: 38,
-    tactical: 30,
-    hacker: 25,
-    master: 21
-  };
-  const clues = cluesMap[difficulty];
+  // Clues calculation
+  let clues: number;
+  if (size === 6) {
+    // 36 total cells
+    const clues6Map: Record<SudokuDifficulty, number> = {
+      casual: 20,
+      tactical: 16,
+      hacker: 13,
+      master: 11
+    };
+    clues = clues6Map[difficulty];
+  } else {
+    // 81 total cells
+    const clues9Map: Record<SudokuDifficulty, number> = {
+      casual: 38,
+      tactical: 30,
+      hacker: 25,
+      master: 21
+    };
+    clues = clues9Map[difficulty];
+  }
 
   // Remove cells to create puzzle
   const puzzle = solution.map((row) => [...row]);
-  let removed = 81 - clues;
+  const totalCells = size * size;
+  const removed = totalCells - clues;
 
   const positions: [number, number][] = [];
-  for (let r = 0; r < 9; r++) {
-    for (let c = 0; c < 9; c++) {
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
       positions.push([r, c]);
     }
   }
@@ -92,10 +135,11 @@ export function createCyberSudokuInitialState(difficulty: SudokuDifficulty = 'ca
   }
 
   const grid: SudokuCell[][] = [];
-  for (let r = 0; r < 9; r++) {
+  for (let r = 0; r < size; r++) {
     const row: SudokuCell[] = [];
-    for (let c = 0; c < 9; c++) {
+    for (let c = 0; c < size; c++) {
       const isInitial = puzzle[r][c] !== 0;
+      const isDiagonal = variant === 'diagonalX' && (r === c || r + c === size - 1);
       row.push({
         row: r,
         col: c,
@@ -103,7 +147,8 @@ export function createCyberSudokuInitialState(difficulty: SudokuDifficulty = 'ca
         solution: solution[r][c],
         initial: isInitial,
         notes: [],
-        error: false
+        error: false,
+        isDiagonal
       });
     }
     grid.push(row);
@@ -111,7 +156,11 @@ export function createCyberSudokuInitialState(difficulty: SudokuDifficulty = 'ca
 
   return {
     grid,
+    size,
+    boxRows,
+    boxCols,
     difficulty,
+    variant,
     mistakes: 0,
     maxMistakes: 3,
     timeSeconds: 0,
@@ -187,13 +236,14 @@ export function placeSudokuNumber(
 
   // Check completion
   let allFilledAndCorrect = true;
-  for (let r = 0; r < 9; r++) {
-    for (let c = 0; c < 9; c++) {
+  for (let r = 0; r < state.size; r++) {
+    for (let c = 0; c < state.size; c++) {
       if (nextGrid[r][c].value !== nextGrid[r][c].solution) {
         allFilledAndCorrect = false;
         break;
       }
     }
+    if (!allFilledAndCorrect) break;
   }
 
   return {
@@ -232,8 +282,8 @@ export function undoSudoku(state: CyberSudokuState): CyberSudokuState {
 
 export function revealHint(state: CyberSudokuState): CyberSudokuState {
   const emptyCells: { r: number; c: number }[] = [];
-  for (let r = 0; r < 9; r++) {
-    for (let c = 0; c < 9; c++) {
+  for (let r = 0; r < state.size; r++) {
+    for (let c = 0; c < state.size; c++) {
       if (state.grid[r][c].value !== state.grid[r][c].solution) {
         emptyCells.push({ r, c });
       }

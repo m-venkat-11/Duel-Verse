@@ -5,7 +5,7 @@ import { GameLoop } from '../../engine/core/GameLoop';
 import { CanvasManager } from '../../engine/core/CanvasManager';
 import { JuiceEngine } from '../../engine/core/JuiceEngine';
 import { soundService } from '../../services/sound';
-import { Zap, Trophy, Play, RotateCcw, Shield, Sparkles } from 'lucide-react';
+import { Zap, Trophy, Play, RotateCcw, Shield, Sparkles, ArrowLeft } from 'lucide-react';
 
 interface FlappySpideyViewProps {
   room: AuthoritativeRoomState<FlappySpideyState>;
@@ -15,7 +15,8 @@ interface FlappySpideyViewProps {
 
 export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
   room,
-  playerUid
+  playerUid,
+  onDispatchAction
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -34,6 +35,14 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    // Load authentic vector Spider-Man sprite
+    const spideySprite = new Image();
+    spideySprite.src = '/assets/spidey_sprite.svg';
+    let isSpriteReady = false;
+    spideySprite.onload = () => {
+      isSpriteReady = true;
+    };
 
     const canvasMgr = new CanvasManager(canvas);
     const juice = new JuiceEngine(250);
@@ -342,10 +351,24 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
         ctx.shadowColor = '#38bdf8';
         ctx.shadowBlur = 12;
         ctx.lineWidth = 2.5;
+
+        // Connect web line precisely to Spidey's outstretched wrist web shooter
+        const cosA = Math.cos(spideyAngle);
+        const sinA = Math.sin(spideyAngle);
+        const handX = SPIDEY_X + (cosA * 23 - sinA * -7);
+        const handY = spideyY + (sinA * 23 + cosA * -7);
+
         ctx.beginPath();
-        ctx.moveTo(SPIDEY_X + 4, spideyY - 6);
+        ctx.moveTo(handX, handY);
         ctx.lineTo(webAnchor.x, webAnchor.y);
         ctx.stroke();
+
+        // Web shooter muzzle flash
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(handX, handY, 3, 0, Math.PI * 2);
+        ctx.fill();
+
         ctx.shadowBlur = 0;
       }
 
@@ -376,44 +399,48 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
         ctx.restore();
       }
 
-      // 6. Avenger Nano-Spidey Character Rendering
+      // 6. Authentic Spider-Man Hero Character Rendering
       ctx.save();
       ctx.translate(SPIDEY_X, spideyY);
       ctx.rotate(spideyAngle);
 
-      // Spider Legs / Nano Web Pack (Backpack)
-      ctx.fillStyle = '#d97706';
-      ctx.fillRect(-10, -8, 5, 16);
+      if (isSpriteReady && spideySprite.complete && spideySprite.naturalWidth > 0) {
+        // Draw real vector Spider-Man sprite with suit lines, eye lenses, and emblem
+        ctx.shadowColor = '#dc2626';
+        ctx.shadowBlur = 10;
+        ctx.drawImage(spideySprite, -35, -25, 70, 50);
+        ctx.shadowBlur = 0;
+      } else {
+        // High-fidelity fallback while loading
+        ctx.fillStyle = '#d97706';
+        ctx.fillRect(-10, -8, 5, 16);
 
-      // Torso (Red & Blue Avenger Armor)
-      ctx.fillStyle = '#dc2626'; // Vibrant Spidey Crimson
-      ctx.shadowColor = '#dc2626';
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, 16, 12, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
+        ctx.fillStyle = '#dc2626';
+        ctx.shadowColor = '#dc2626';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 16, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
 
-      // Blue Flank Plates
-      ctx.fillStyle = '#2563eb';
-      ctx.beginPath();
-      ctx.arc(0, 5, 9, 0, Math.PI);
-      ctx.fill();
+        ctx.fillStyle = '#2563eb';
+        ctx.beginPath();
+        ctx.arc(0, 5, 9, 0, Math.PI);
+        ctx.fill();
 
-      // Golden Spider Chest Icon
-      ctx.fillStyle = '#fbbf24';
-      ctx.beginPath();
-      ctx.arc(0, -1, 3.5, 0, Math.PI * 2);
-      ctx.fill();
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath();
+        ctx.arc(0, -1, 3.5, 0, Math.PI * 2);
+        ctx.fill();
 
-      // Mask Eyes (White Glowing Slanted Lenses)
-      ctx.fillStyle = '#ffffff';
-      ctx.shadowColor = '#38bdf8';
-      ctx.shadowBlur = 10;
-      ctx.beginPath();
-      ctx.ellipse(6, -4, 4.5, 3, 0.35, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = '#38bdf8';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.ellipse(6, -4, 4.5, 3, 0.35, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
 
       ctx.restore();
 
@@ -454,25 +481,30 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
   return (
     <div ref={containerRef} className="w-full max-w-xl mx-auto flex flex-col items-center select-none gap-2.5 px-2">
       {/* Top Arcade HUD */}
-      <div className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl bg-slate-900/90 border border-slate-700/60 text-xs font-black font-mono shadow-md backdrop-blur-md">
+      <div className="w-full flex items-center justify-between px-3 py-2 sm:px-4 sm:py-2.5 rounded-2xl bg-slate-900/90 border border-slate-700/60 text-xs font-black font-mono shadow-md backdrop-blur-md">
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => onDispatchAction('leave', {})}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-violet-600/30 hover:bg-violet-600/50 border border-violet-400/50 text-white font-mono text-[11px] font-bold active:scale-95 transition shrink-0 shadow"
+            title="Return to Arcade Library"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 text-violet-300 stroke-[3]" />
+            <span>Arcade</span>
+          </button>
           <span className="text-rose-400 font-bold flex items-center gap-1.5">
             <span className="text-base">🕷️</span>
-            <span>AVENGER SPIDEY</span>
-          </span>
-          <span className="px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-300 text-[10px] font-mono border border-rose-500/30">
-            SOLO ARCADE
+            <span className="hidden xs:inline">AVENGER SPIDEY</span>
           </span>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
           <div className="flex items-center gap-1.5 text-amber-400">
             <Trophy className="w-4 h-4 fill-current" />
-            <span className="text-sm font-['Outfit'] font-black tabular-nums">{highScore}</span>
+            <span className="text-xs sm:text-sm font-['Outfit'] font-black tabular-nums">{highScore}</span>
           </div>
-          <div className="flex items-center gap-1.5 text-cyan-400">
-            <span className="text-xs text-slate-400">SCORE</span>
-            <span className="text-xl font-['Outfit'] font-black tabular-nums text-white">{score}</span>
+          <div className="flex items-center gap-1 text-cyan-400">
+            <span className="text-[10px] sm:text-xs text-slate-400">SCORE</span>
+            <span className="text-lg sm:text-xl font-['Outfit'] font-black tabular-nums text-white">{score}</span>
           </div>
         </div>
       </div>
@@ -530,21 +562,34 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
               </div>
             </div>
 
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleFlapRef.current();
-              }}
-              onTouchStart={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleFlapRef.current();
-              }}
-              className="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-rose-500 to-amber-500 text-slate-950 font-black font-['Outfit'] text-lg flex items-center gap-2 shadow-2xl active:scale-95 transition touch-none select-none"
-            >
-              <RotateCcw className="w-5 h-5 stroke-[2.5]" />
-              <span>SWING AGAIN</span>
-            </button>
+            <div className="flex flex-col sm:flex-row items-center gap-3">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleFlapRef.current();
+                }}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleFlapRef.current();
+                }}
+                className="px-7 py-3 rounded-2xl bg-gradient-to-r from-rose-500 to-amber-500 text-slate-950 font-black font-['Outfit'] text-base flex items-center gap-2 shadow-2xl active:scale-95 transition touch-none select-none"
+              >
+                <RotateCcw className="w-5 h-5 stroke-[2.5]" />
+                <span>SWING AGAIN</span>
+              </button>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDispatchAction('leave', {});
+                }}
+                className="px-5 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-white/20 text-white font-mono text-xs font-bold flex items-center gap-2 active:scale-95 transition"
+              >
+                <ArrowLeft className="w-4 h-4 text-violet-300" />
+                <span>EXIT TO ARCADE</span>
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -272,8 +272,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </p>
           </div>
 
-          {/* Category Filter Pills */}
-          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-900/90 rounded-2xl border border-white/10">
+          {/* Category Filter Pills - Smooth touch horizontal carousel on mobile */}
+          <div className="flex items-center gap-1.5 p-1 bg-slate-900/90 rounded-2xl border border-white/10 overflow-x-auto no-scrollbar max-w-full">
             {categories.map((cat) => (
               <button
                 key={cat.id}
@@ -281,7 +281,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   soundService.playClick();
                   setSelectedCategory(cat.id);
                 }}
-                className={`px-3 py-1.5 rounded-xl text-xs font-black font-['Outfit'] transition flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-black font-['Outfit'] transition flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
                   selectedCategory === cat.id
                     ? 'bg-violet-600 text-white shadow-md shadow-violet-500/40'
                     : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
