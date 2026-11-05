@@ -1,98 +1,205 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 100" width="140" height="100">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 110" width="160" height="110">
   <defs>
-    <!-- Suit Shading Gradients -->
-    <linearGradient id="spideyRed" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ff2a3b"/>
-      <stop offset="60%" stop-color="#d61426"/>
-      <stop offset="100%" stop-color="#8c0714"/>
+    <!-- Suit Red Gradient with 3D Specular Depth -->
+    <linearGradient id="suitRed" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff334b"/>
+      <stop offset="45%" stop-color="#e11d48"/>
+      <stop offset="85%" stop-color="#be123c"/>
+      <stop offset="100%" stop-color="#881337"/>
     </linearGradient>
-    <linearGradient id="spideyBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+
+    <!-- Suit Blue Navy Gradient -->
+    <linearGradient id="suitBlue" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#2563eb"/>
       <stop offset="50%" stop-color="#1d4ed8"/>
-      <stop offset="100%" stop-color="#0f2b73"/>
+      <stop offset="85%" stop-color="#1e3a8a"/>
+      <stop offset="100%" stop-color="#0f172a"/>
     </linearGradient>
-    <linearGradient id="lensGloss" x1="0%" y1="0%" x2="100%" y2="100%">
+
+    <!-- Mask Highlight Gradient -->
+    <radialGradient id="maskGloss" cx="70%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#ff4d6d"/>
+      <stop offset="60%" stop-color="#e11d48"/>
+      <stop offset="100%" stop-color="#9f1239"/>
+    </radialGradient>
+
+    <!-- Eye Lens Pure White to Cyan Sheen -->
+    <linearGradient id="lensWhite" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="70%" stop-color="#e0f2fe"/>
-      <stop offset="100%" stop-color="#bae6fd"/>
+      <stop offset="65%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
     </linearGradient>
-    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="2" result="blur"/>
+
+    <!-- Lens Specular Glint -->
+    <linearGradient id="lensGlint" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.2"/>
+    </linearGradient>
+
+    <!-- Neon Energy Glow -->
+    <filter id="spiderGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
       <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <filter id="webSpark" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
   </defs>
 
-  <!-- Dynamic Spider-Man Flight Pose (Facing Right) -->
-  <g id="spiderman-hero" transform="translate(10, 5)">
-    <!-- Back Arm (Trailing Aerodynamic) -->
-    <path d="M 42 45 L 20 40 L 10 32 L 8 36 L 18 46 L 38 52 Z" fill="#1d4ed8" stroke="#0a1838" stroke-width="1.5"/>
-    <path d="M 20 40 L 10 32 L 8 36 L 18 46 Z" fill="url(#spideyRed)" stroke="#0a1838" stroke-width="1.5"/>
+  <g id="spider-man" transform="translate(8, 6)">
+    <!-- ========================================== -->
+    <!-- 1. BACK ARM (AERODYNAMIC TRAILING) -->
+    <!-- ========================================== -->
+    <!-- Back Bicep (Navy Blue) -->
+    <path d="M 44 46 L 26 40 L 22 45 L 38 53 Z" fill="url(#suitBlue)" stroke="#090d16" stroke-width="1.6"/>
+    <!-- Back Forearm & Glove (Red with Webbing) -->
+    <path d="M 26 40 L 12 32 L 8 36 L 22 45 Z" fill="url(#suitRed)" stroke="#090d16" stroke-width="1.6"/>
+    <line x1="16" y1="34" x2="19" y2="40" stroke="#4c0519" stroke-width="1"/>
+    <!-- Back Hand / Fist -->
+    <path d="M 12 32 L 7 28 Q 5 31 8 36 Z" fill="url(#suitRed)" stroke="#090d16" stroke-width="1.4"/>
 
-    <!-- Back Leg (Trailing Leg in Streamline Flight) -->
-    <path d="M 38 52 L 18 64 L 2 72 L 4 77 L 22 68 L 42 58 Z" fill="url(#spideyBlue)" stroke="#0a1838" stroke-width="1.5"/>
-    <!-- Back Boot -->
-    <path d="M 16 66 L 2 72 L 4 77 L 20 70 Z" fill="url(#spideyRed)" stroke="#0a1838" stroke-width="1.2"/>
+    <!-- ========================================== -->
+    <!-- 2. BACK LEG (STREAMLINE EXTENDED FLIGHT) -->
+    <!-- ========================================== -->
+    <!-- Back Thigh (Navy Blue) -->
+    <path d="M 42 54 L 24 64 L 20 68 L 38 60 Z" fill="url(#suitBlue)" stroke="#090d16" stroke-width="1.6"/>
+    <!-- Back Calf (Navy Blue) -->
+    <path d="M 24 64 L 10 74 L 14 78 L 26 69 Z" fill="url(#suitBlue)" stroke="#090d16" stroke-width="1.6"/>
+    <!-- Back Boot (Red with Tread & Web) -->
+    <path d="M 14 71 L 2 79 L 4 84 L 17 76 Z" fill="url(#suitRed)" stroke="#090d16" stroke-width="1.5"/>
+    <line x1="8" y1="75" x2="10" y2="81" stroke="#4c0519" stroke-width="0.9"/>
 
-    <!-- Front Leg (Bent Knee High Velocity Pose) -->
-    <path d="M 48 54 L 34 68 L 26 84 L 32 87 L 42 70 L 56 58 Z" fill="url(#spideyBlue)" stroke="#0a1838" stroke-width="1.5"/>
-    <!-- Front Boot -->
-    <path d="M 32 72 L 26 84 L 32 87 L 40 73 Z" fill="url(#spideyRed)" stroke="#0a1838" stroke-width="1.2"/>
-    <!-- Web Pattern on Boot -->
-    <line x1="28" y1="80" x2="36" y2="78" stroke="#330307" stroke-width="0.8"/>
+    <!-- ========================================== -->
+    <!-- 3. FRONT LEG (BENT KNEE DYNAMIC POSE) -->
+    <!-- ========================================== -->
+    <!-- Front Thigh (Muscular Navy Blue) -->
+    <path d="M 52 56 L 38 72 L 44 76 L 60 62 Z" fill="url(#suitBlue)" stroke="#090d16" stroke-width="1.8"/>
+    <!-- Knee Joint (Red Cap) -->
+    <path d="M 38 72 Q 33 76 34 81 Q 40 84 44 76 Z" fill="url(#suitRed)" stroke="#090d16" stroke-width="1.5"/>
+    <!-- Front Shin / Calf (Navy Blue) -->
+    <path d="M 34 81 L 28 92 L 34 95 L 42 83 Z" fill="url(#suitBlue)" stroke="#090d16" stroke-width="1.6"/>
+    <!-- Front Boot (Iconic Red Spider Boot) -->
+    <path d="M 30 88 L 24 99 L 32 101 L 38 91 Z" fill="url(#suitRed)" stroke="#090d16" stroke-width="1.6"/>
+    <!-- Boot Webbing -->
+    <line x1="26" y1="94" x2="33" y2="92" stroke="#4c0519" stroke-width="1"/>
+    <line x1="28" y1="97" x2="34" y2="95" stroke="#4c0519" stroke-width="1"/>
 
-    <!-- Torso / Body -->
-    <!-- Blue Sides -->
-    <path d="M 44 38 Q 36 46 40 56 Q 52 58 60 52 Q 54 44 48 38 Z" fill="url(#spideyBlue)" stroke="#0a1838" stroke-width="1.5"/>
-    <!-- Red Center Chest & Shoulder -->
-    <path d="M 48 34 Q 66 32 72 42 Q 68 56 56 56 Q 44 54 44 42 Z" fill="url(#spideyRed)" stroke="#0a1838" stroke-width="1.5"/>
+    <!-- ========================================== -->
+    <!-- 4. TORSO (CHEST, ABS, AND SHOULDERS) -->
+    <!-- ========================================== -->
+    <!-- Navy Blue Side Ribs & Flanks -->
+    <path d="M 46 40 Q 38 48 42 58 Q 54 62 64 54 Q 58 46 50 40 Z" fill="url(#suitBlue)" stroke="#090d16" stroke-width="1.8"/>
 
-    <!-- Iconic Black Chest Spider Emblem -->
-    <!-- Spider Body -->
-    <ellipse cx="60" cy="45" rx="2.5" ry="4" fill="#09090b"/>
-    <!-- Spider Legs (Upper 4 legs) -->
-    <path d="M 60 43 Q 66 36 72 38" stroke="#09090b" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-    <path d="M 60 44 Q 68 42 73 45" stroke="#09090b" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-    <path d="M 59 43 Q 54 36 50 38" stroke="#09090b" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-    <path d="M 59 44 Q 52 42 48 45" stroke="#09090b" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-    <!-- Spider Legs (Lower 4 legs) -->
-    <path d="M 60 46 Q 66 50 71 52" stroke="#09090b" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-    <path d="M 60 47 Q 64 54 67 56" stroke="#09090b" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-    <path d="M 59 46 Q 54 50 50 52" stroke="#09090b" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-    <path d="M 59 47 Q 56 54 53 56" stroke="#09090b" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+    <!-- Red Center Chest & Shoulders -->
+    <path d="M 50 36 Q 70 33 78 44 Q 74 60 60 60 Q 46 58 46 44 Z" fill="url(#suitRed)" stroke="#090d16" stroke-width="1.8"/>
 
-    <!-- Front Arm (Reaching Forward Shooting Web) -->
-    <path d="M 66 38 L 86 34 L 104 28 L 107 33 L 90 40 L 70 44 Z" fill="url(#spideyRed)" stroke="#0a1838" stroke-width="1.5"/>
-    <!-- Blue under-arm segment -->
-    <path d="M 72 41 L 86 37 L 88 40 L 74 44 Z" fill="url(#spideyBlue)"/>
-    <!-- Web Pattern Lines on Arm -->
-    <line x1="84" y1="34" x2="88" y2="40" stroke="#330307" stroke-width="0.8"/>
-    <line x1="96" y1="30" x2="99" y2="36" stroke="#330307" stroke-width="0.8"/>
-    <!-- Wrist & Web Shooter Hand (Classic Spidey "Thwip" 2-fingers-in pose) -->
-    <path d="M 104 28 L 112 26 Q 115 28 112 30 L 108 31 L 114 34 L 111 36 L 106 33 Z" fill="url(#spideyRed)" stroke="#0a1838" stroke-width="1.2"/>
-    <!-- Metallic Web Shooter Nozzle -->
-    <circle cx="106" cy="31" r="1.5" fill="#e2e8f0" stroke="#0f172a" stroke-width="0.6"/>
+    <!-- Suit Chest Webbing Lines -->
+    <path d="M 62 36 Q 64 48 64 60" stroke="#4c0519" stroke-width="1.1" fill="none"/>
+    <path d="M 50 44 Q 63 46 76 42" stroke="#4c0519" stroke-width="1.1" fill="none"/>
+    <path d="M 52 52 Q 62 54 72 50" stroke="#4c0519" stroke-width="1.1" fill="none"/>
 
-    <!-- Head & Mask -->
-    <!-- Mask Base (Streamlined Oval Angle) -->
-    <path d="M 68 28 Q 72 16 86 16 Q 98 16 98 28 Q 98 38 88 40 Q 76 40 68 28 Z" fill="url(#spideyRed)" stroke="#0a1838" stroke-width="1.6"/>
-    <!-- Mask Webbing Grid Lines -->
-    <path d="M 86 16 Q 86 28 86 40" stroke="#4a040b" stroke-width="0.9" fill="none"/>
-    <path d="M 72 22 Q 86 26 98 22" stroke="#4a040b" stroke-width="0.9" fill="none"/>
-    <path d="M 70 32 Q 86 33 96 32" stroke="#4a040b" stroke-width="0.9" fill="none"/>
-    <path d="M 78 18 Q 88 28 92 38" stroke="#4a040b" stroke-width="0.9" fill="none"/>
+    <!-- ICONIC BLACK SPIDER EMBLEM ON CHEST -->
+    <!-- Spider Body & Thorax -->
+    <ellipse cx="64" cy="48" rx="2.8" ry="4.5" fill="#09090b"/>
+    <ellipse cx="64" cy="45" rx="2.2" ry="2.2" fill="#09090b"/>
+    <!-- Upper 4 Legs (Angled Sharp Upward) -->
+    <path d="M 64 46 Q 72 38 78 41" stroke="#09090b" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+    <path d="M 64 47 Q 73 44 80 48" stroke="#09090b" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+    <path d="M 64 46 Q 56 38 50 41" stroke="#09090b" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+    <path d="M 64 47 Q 55 44 48 48" stroke="#09090b" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+    <!-- Lower 4 Legs (Angled Sharp Downward) -->
+    <path d="M 64 50 Q 72 54 78 57" stroke="#09090b" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+    <path d="M 64 51 Q 69 59 74 62" stroke="#09090b" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+    <path d="M 64 50 Q 56 54 50 57" stroke="#09090b" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+    <path d="M 64 51 Q 59 59 54 62" stroke="#09090b" stroke-width="1.4" fill="none" stroke-linecap="round"/>
 
-    <!-- Authentic Spider-Man Eye Lens (Front Eye) -->
-    <!-- Black Outer Rim Border -->
-    <path d="M 80 23 Q 86 20 95 24 Q 94 33 83 33 Q 78 30 80 23 Z" fill="#09090b" stroke="#000000" stroke-width="1.5"/>
-    <!-- Glossy White Triangular Lens -->
-    <path d="M 82 24 Q 87 22 93 25 Q 92 31 84 31 Q 81 29 82 24 Z" fill="url(#lensGloss)" filter="url(#neonGlow)"/>
-    <!-- White Specular Sparkle Highlight -->
-    <polygon points="85,25 88,24 87,27" fill="#ffffff"/>
+    <!-- Red Belt Line -->
+    <path d="M 54 58 Q 62 61 70 57" stroke="url(#suitRed)" stroke-width="3" fill="none"/>
 
-    <!-- Web Fluid Blast Emitter Effect (Thwip Sparks) -->
-    <circle cx="114" cy="27" r="2.5" fill="#38bdf8" filter="url(#neonGlow)"/>
-    <line x1="113" y1="27" x2="128" y2="24" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
-    <line x1="114" y1="26" x2="124" y2="20" stroke="#bae6fd" stroke-width="1.2" stroke-linecap="round"/>
-    <line x1="114" y1="28" x2="123" y2="33" stroke="#bae6fd" stroke-width="1.2" stroke-linecap="round"/>
+    <!-- ========================================== -->
+    <!-- 5. FRONT ARM & WEB SHOOTER (THWIP POSE) -->
+    <!-- ========================================== -->
+    <!-- Shoulder / Bicep (Red with web pattern) -->
+    <path d="M 72 40 L 94 36 L 98 42 L 76 47 Z" fill="url(#suitRed)" stroke="#090d16" stroke-width="1.8"/>
+    <!-- Blue Underarm Inset -->
+    <path d="M 78 44 L 92 40 L 95 43 L 80 47 Z" fill="url(#suitBlue)"/>
+    <!-- Forearm & Glove (Solid Red) -->
+    <path d="M 94 36 L 118 30 L 122 36 L 98 42 Z" fill="url(#suitRed)" stroke="#090d16" stroke-width="1.8"/>
+
+    <!-- Arm Web Lines -->
+    <line x1="88" y1="37" x2="91" y2="44" stroke="#4c0519" stroke-width="1.1"/>
+    <line x1="104" y1="34" x2="107" y2="40" stroke="#4c0519" stroke-width="1.1"/>
+    <line x1="112" y1="32" x2="115" y2="38" stroke="#4c0519" stroke-width="1.1"/>
+
+    <!-- Metallic Web Shooter Wristband -->
+    <rect x="114" y="31" width="4" height="7" rx="1.5" fill="#94a3b8" stroke="#090d16" stroke-width="1"/>
+    <!-- Silver Trigger Nozzle -->
+    <circle cx="119" cy="33" r="1.8" fill="#f8fafc" stroke="#090d16" stroke-width="0.8"/>
+
+    <!-- Iconic "Thwip" Hand (Thumb, Index, Pinky extended; Middle, Ring tucked) -->
+    <!-- Hand base / palm -->
+    <path d="M 118 30 L 126 28 L 128 35 L 121 36 Z" fill="url(#suitRed)" stroke="#090d16" stroke-width="1.5"/>
+    <!-- Index Finger (Reaching forward) -->
+    <path d="M 126 28 L 134 26 L 133 29 L 126 31 Z" fill="url(#suitRed)" stroke="#090d16" stroke-width="1.2"/>
+    <!-- Pinky Finger (Extended lower) -->
+    <path d="M 125 35 L 133 38 L 131 40 L 123 37 Z" fill="url(#suitRed)" stroke="#090d16" stroke-width="1.2"/>
+    <!-- Tucked Middle & Ring Knuckles -->
+    <ellipse cx="127" cy="32" rx="2.5" ry="3" fill="#9f1239" stroke="#090d16" stroke-width="1"/>
+
+    <!-- ========================================== -->
+    <!-- 6. SPIDER-MAN MASK & EXPRESSIVE EYES -->
+    <!-- ========================================== -->
+    <!-- Mask Silhouette (Sleek aerodynamic forward tilt) -->
+    <path d="M 74 30 Q 78 16 94 15 Q 108 15 110 27 Q 110 39 98 42 Q 84 43 74 30 Z" fill="url(#maskGloss)" stroke="#090d16" stroke-width="2"/>
+
+    <!-- Intricate Mask Web Pattern (Radiating from Nose Bridge) -->
+    <!-- Radial Lines -->
+    <path d="M 94 15 Q 96 28 98 42" stroke="#4c0519" stroke-width="1.1" fill="none"/>
+    <path d="M 82 20 Q 94 28 108 34" stroke="#4c0519" stroke-width="1" fill="none"/>
+    <path d="M 76 29 Q 94 30 110 24" stroke="#4c0519" stroke-width="1" fill="none"/>
+    <path d="M 86 16 Q 96 25 106 38" stroke="#4c0519" stroke-width="1" fill="none"/>
+    <!-- Webbing Concentric Arcs -->
+    <path d="M 88 19 Q 96 21 104 18" stroke="#4c0519" stroke-width="0.9" fill="none"/>
+    <path d="M 83 25 Q 96 28 107 23" stroke="#4c0519" stroke-width="0.9" fill="none"/>
+    <path d="M 85 34 Q 96 36 105 32" stroke="#4c0519" stroke-width="0.9" fill="none"/>
+
+    <!-- FAR EYE LENS (3/4 Perspective Foreshortened) -->
+    <path d="M 80 20 Q 84 18 89 21 Q 87 27 82 27 Q 79 24 80 20 Z" fill="#09090b" stroke="#000000" stroke-width="1.6"/>
+    <path d="M 81 21 Q 84 19 88 22 Q 86 26 83 26 Q 81 24 81 21 Z" fill="url(#lensWhite)"/>
+
+    <!-- NEAR EYE LENS (Iconic Large Curved Triangular Lens) -->
+    <!-- Bold Black Outer Frame Border -->
+    <path d="M 90 22 Q 98 18 108 23 Q 106 35 94 35 Q 87 31 90 22 Z" fill="#09090b" stroke="#000000" stroke-width="2.2" stroke-linejoin="round"/>
+    <!-- Inner Pure White Lens -->
+    <path d="M 92 23 Q 98 20 106 24 Q 104 33 95 33 Q 90 30 92 23 Z" fill="url(#lensWhite)" filter="url(#spiderGlow)"/>
+    <!-- Cyan Sheen Glint -->
+    <path d="M 93 24 Q 98 21 104 25 Q 100 27 95 27 Z" fill="url(#lensGlint)"/>
+    <!-- Specular Highlight Dot -->
+    <circle cx="95" cy="24.5" r="1.3" fill="#ffffff"/>
+
+    <!-- ========================================== -->
+    <!-- 7. WEB BLAST STREAM & FIRING PARTICLES -->
+    <!-- ========================================== -->
+    <!-- Web Muzzle Burst -->
+    <circle cx="123" cy="32" r="3.5" fill="#38bdf8" filter="url(#webSpark)"/>
+    <circle cx="123" cy="32" r="1.8" fill="#ffffff"/>
+
+    <!-- Laser High-Tensile Web Stream -->
+    <path d="M 124 32 Q 138 29 152 25" stroke="#ffffff" stroke-width="2.6" fill="none" stroke-linecap="round" filter="url(#webSpark)"/>
+    <path d="M 124 32 Q 138 29 152 25" stroke="#38bdf8" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+
+    <!-- Spiral Web Fiber Filaments -->
+    <path d="M 126 31 Q 132 26 138 31 Q 144 35 150 28" stroke="rgba(255, 255, 255, 0.85)" stroke-width="1.2" fill="none"/>
+    <path d="M 127 34 Q 134 37 141 31 Q 147 26 153 25" stroke="rgba(56, 189, 248, 0.75)" stroke-width="1" fill="none"/>
+
+    <!-- Web Sparks / Thwip Energy Particles -->
+    <circle cx="132" cy="24" r="1.2" fill="#ffffff"/>
+    <circle cx="140" cy="37" r="1.4" fill="#38bdf8"/>
+    <circle cx="148" cy="23" r="1.1" fill="#ffffff"/>
   </g>
 </svg>

@@ -405,10 +405,14 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
       ctx.rotate(spideyAngle);
 
       if (isSpriteReady && spideySprite.complete && spideySprite.naturalWidth > 0) {
-        // Draw real vector Spider-Man sprite with suit lines, eye lenses, and emblem
-        ctx.shadowColor = '#dc2626';
-        ctx.shadowBlur = 10;
-        ctx.drawImage(spideySprite, -35, -25, 70, 50);
+        // Draw real vector Spider-Man sprite — larger, with vivid neon red glow
+        const fallAngle = spideyAngle;
+        const isPlunging = fallAngle > 0.3;
+        const glowIntensity = isPlunging ? 6 : 14;
+        ctx.shadowColor = isPlunging ? '#be123c' : '#dc2626';
+        ctx.shadowBlur = glowIntensity;
+        // Larger draw: 90×64 centered (was 70×50)
+        ctx.drawImage(spideySprite, -45, -32, 90, 64);
         ctx.shadowBlur = 0;
       } else {
         // High-fidelity fallback while loading

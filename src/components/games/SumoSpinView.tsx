@@ -33,6 +33,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
   const p2Nickname = room.players[p2Uid]?.nickname || 'CyberBot';
 
   const [roundWinnerName, setRoundWinnerName] = useState<string | null>(null);
+  const roundWinnerNameRef = useRef<string | null>(null);
   const [boostReady, setBoostReady] = useState<boolean>(true);
 
   // Input states
@@ -100,6 +101,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
 
     const resetRoundState = () => {
       isRoundOver = false;
+      roundWinnerNameRef.current = null;
       setRoundWinnerName(null);
       spinners[p1Uid].x = ARENA_CX - 90;
       spinners[p1Uid].y = ARENA_CY;
@@ -181,12 +183,12 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
           }
         }
 
-        // Keyboard steering fallback
+        // Keyboard and Mobile Steering D-Pad
         const speed = 4.8;
-        if (keysDown.current['a'] || keysDown.current['arrowleft']) steerX -= speed;
-        if (keysDown.current['d'] || keysDown.current['arrowright']) steerX += speed;
-        if (keysDown.current['w'] || keysDown.current['arrowup']) steerY -= speed;
-        if (keysDown.current['s'] || keysDown.current['arrowdown']) steerY += speed;
+        if (keysDown.current['a'] || keysDown.current['arrowleft'] || mobileInput.current.left) steerX -= speed;
+        if (keysDown.current['d'] || keysDown.current['arrowright'] || mobileInput.current.right) steerX += speed;
+        if (keysDown.current['w'] || keysDown.current['arrowup'] || mobileInput.current.up) steerY -= speed;
+        if (keysDown.current['s'] || keysDown.current['arrowdown'] || mobileInput.current.down) steerY += speed;
 
         // Boost trigger
         const isBoost = (keysDown.current[' '] || mobileInput.current.boost) && mySpin.boostCooldown === 0;
@@ -316,6 +318,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
 
           const victorUid = uid === p1Uid ? p2Uid : p1Uid;
           const victorName = victorUid === p1Uid ? p1Nickname : p2Nickname;
+          roundWinnerNameRef.current = victorName;
           setRoundWinnerName(victorName);
 
           juice.addTrauma(0.6);
@@ -387,38 +390,123 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
 
         ctx.save();
         ctx.translate(spin.x, spin.y);
-        ctx.rotate(spin.angle);
 
         const isP1Spin = uid === p1Uid;
         const color = isP1Spin ? '#f59e0b' : '#06b6d4';
         const bladeColor = isP1Spin ? '#fbbf24' : '#38bdf8';
+        const speed = Math.hypot(spin.vx, spin.vy);
 
-        // Outer spinning spiked blades (4 blades)
-        ctx.fillStyle = bladeColor;
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 12;
-        for (let i = 0; i < 4; i++) {
-          ctx.rotate((Math.PI * 2) / 4);
+        // Velocity trail
+        ctx.rotate(spin.angle);
+        const trailLen = Math.min(50, speed * 8);
+        if (trailLen > 2) {
+          const trailGrad = ctx.createLinearGradient(0, 0, 0, trailLen);
+          trailGrad.addColorStop(0, `${color}80`);
+          trailGrad.addColorStop(1, 'transparent');
+          ctx.fillStyle = trailGrad;
           ctx.beginPath();
-          ctx.moveTo(-SPINNER_R + 6, -6);
-          ctx.lineTo(-SPINNER_R - 8, 0);
-          ctx.lineTo(-SPINNER_R + 6, 6);
+          ctx.ellipse(0, trailLen * 0.5, SPINNER_R * 0.5, trailLen * 0.5, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+
+        ctx.save();
+        ctx.translate(spin.x, spin.y);
+        ctx.rotate(spin.angle);
+
+        // Outer ring
+        ctx.strokeStyle = bladeColor;
+        ctx.lineWidth = 3;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.arc(0, 0, SPINNER_R, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 6 blades (hexagonal beyblade style)
+        ctx.fillStyle = bladeColor;
+        for (let i = 0; i < 6; i++) {
+          ctx.rotate((Math.PI * 2) / 6);
+          ctx.beginPath();
+          ctx.moveTo(-SPINNER_R + 7, -5);
+          ctx.lineTo(-SPINNER_R - 10, 0);
+          ctx.lineTo(-SPINNER_R + 7, 5);
           ctx.closePath();
           ctx.fill();
         }
         ctx.shadowBlur = 0;
 
-        // Armored Center Beyblade Core
+        // Hexagonal center core pattern
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(0, 0, SPINNER_R - 2, 0, Math.PI * 2);
+        for (let i = 0; i < 6; i++) {
+          const ang = (i / 6) * Math.PI * 2;
+          const hx = Math.cos(ang) * (SPINNER_R - 8);
+          const hy = Math.sin(ang) * (SPINNER_R - 8);
+          if (i === 0) ctx.moveTo(hx, hy); else ctx.lineTo(hx, hy);
+        }
+        ctx.closePath();
         ctx.fill();
 
+        // Inner dark disc
         ctx.fillStyle = '#0f172a';
         ctx.beginPath();
-        ctx.arc(0, 0, 10, 0, Math.PI * 2);
+        ctx.arc(0, 0, 11, 0, Math.PI * 2);
         ctx.fill();
 
+        // Central gem
+        ctx.fillStyle = uid === playerUid ? '#ffffff' : '#94a3b8';
+        ctx.shadowColor = uid === playerUid ? '#ffffff' : color;
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(0, 0, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.restore();
+
+        // "YOU" / name label above spinner
+        ctx.save();
+        ctx.font = `bold 11px sans-serif`;
+        ctx.textAlign = 'center';
+        if (uid === playerUid) {
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 8;
+          ctx.fillText('▼ YOU', spin.x, spin.y - SPINNER_R - 8);
+        } else {
+          ctx.fillStyle = color;
+          ctx.fillText(uid === p1Uid ? p1Nickname.substring(0, 8) : p2Nickname.substring(0, 8), spin.x, spin.y - SPINNER_R - 8);
+        }
+        ctx.shadowBlur = 0;
+        ctx.restore();
+      }
+
+      // Interactive Touch-Drag Joystick Visual Guide
+      if (touchDrag.active) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(139, 92, 246, 0.4)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(touchDrag.startX, touchDrag.startY, 36, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(touchDrag.startX, touchDrag.startY);
+        ctx.lineTo(touchDrag.currX, touchDrag.currY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#06b6d4';
+        ctx.shadowColor = '#06b6d4';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(touchDrag.currX, touchDrag.currY, 14, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
         ctx.restore();
       }
 
@@ -426,7 +514,8 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
       juice.renderParticles(ctx, 1.0);
 
       // Round Winner Overlay
-      if (roundWinnerName) {
+      const curWinner = roundWinnerNameRef.current || roundWinnerName;
+      if (curWinner) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
         ctx.fillRect(0, 0, W, H);
         ctx.fillStyle = '#fbbf24';
@@ -434,7 +523,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
         ctx.textAlign = 'center';
         ctx.shadowColor = '#fbbf24';
         ctx.shadowBlur = 20;
-        ctx.fillText(`💥 ${roundWinnerName.toUpperCase()} SCORED!`, W / 2, H / 2);
+        ctx.fillText(`💥 ${curWinner.toUpperCase()} SCORED!`, W / 2, H / 2);
         ctx.shadowBlur = 0;
       }
 
@@ -475,32 +564,60 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
         <canvas ref={canvasRef} className="w-full h-full block" />
       </div>
 
-      {/* Mobile Touch-Drag Control Bar & Slam Boost */}
-      <div className="w-full grid grid-cols-2 gap-3 max-w-md pt-1">
-        {/* Touch-Drag Guidance Card */}
-        <div className="flex flex-col justify-center p-3 bg-slate-900/90 rounded-2xl border border-violet-500/40 shadow-lg text-left">
-          <span className="text-xs font-black font-['Outfit'] text-violet-300 flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-violet-400 animate-ping" />
-            1-FINGER TOUCH DRAG
-          </span>
-          <span className="text-[10px] text-slate-400 font-mono mt-1">
-            Drag on arena to steer & push rival over the glowing edge!
-          </span>
+      {/* Mobile Touch D-Pad & Slam Boost */}
+      <div className="w-full flex items-center justify-between gap-3 max-w-md pt-1">
+        {/* Compact Directional D-Pad */}
+        <div className="grid grid-cols-3 gap-1.5 p-1.5 bg-slate-900/90 rounded-2xl border border-slate-700/60 shadow-lg select-none">
+          <div />
+          <button
+            onPointerDown={() => { mobileInput.current.up = true; }}
+            onPointerUp={() => { mobileInput.current.up = false; }}
+            onPointerLeave={() => { mobileInput.current.up = false; }}
+            className="w-11 h-11 rounded-xl bg-slate-800 active:bg-violet-600 border border-slate-700 flex items-center justify-center text-slate-200 active:text-white shadow active:scale-95 touch-manipulation"
+          >
+            <ArrowUp className="w-5 h-5" />
+          </button>
+          <div />
+
+          <button
+            onPointerDown={() => { mobileInput.current.left = true; }}
+            onPointerUp={() => { mobileInput.current.left = false; }}
+            onPointerLeave={() => { mobileInput.current.left = false; }}
+            className="w-11 h-11 rounded-xl bg-slate-800 active:bg-violet-600 border border-slate-700 flex items-center justify-center text-slate-200 active:text-white shadow active:scale-95 touch-manipulation"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <button
+            onPointerDown={() => { mobileInput.current.down = true; }}
+            onPointerUp={() => { mobileInput.current.down = false; }}
+            onPointerLeave={() => { mobileInput.current.down = false; }}
+            className="w-11 h-11 rounded-xl bg-slate-800 active:bg-violet-600 border border-slate-700 flex items-center justify-center text-slate-200 active:text-white shadow active:scale-95 touch-manipulation"
+          >
+            <ArrowDown className="w-5 h-5" />
+          </button>
+          <button
+            onPointerDown={() => { mobileInput.current.right = true; }}
+            onPointerUp={() => { mobileInput.current.right = false; }}
+            onPointerLeave={() => { mobileInput.current.right = false; }}
+            className="w-11 h-11 rounded-xl bg-slate-800 active:bg-violet-600 border border-slate-700 flex items-center justify-center text-slate-200 active:text-white shadow active:scale-95 touch-manipulation"
+          >
+            <ArrowRight className="w-5 h-5" />
+          </button>
         </div>
 
         {/* Slam Boost Trigger */}
-        <div className="flex items-center">
+        <div className="flex-1 flex flex-col items-stretch h-full">
           <button
             onClick={() => { mobileInput.current.boost = true; }}
             disabled={!boostReady}
-            className={`w-full h-16 rounded-2xl font-black font-['Outfit'] text-base flex items-center justify-center gap-2 shadow-2xl active:scale-95 transition border-2 ${
+            className={`w-full h-[100px] rounded-2xl font-black font-['Outfit'] text-base flex flex-col items-center justify-center gap-1.5 shadow-2xl active:scale-95 transition border-2 touch-manipulation ${
               boostReady
                 ? 'bg-gradient-to-r from-amber-500 to-rose-500 border-amber-300 text-slate-950 shadow-amber-500/30'
                 : 'bg-slate-800 border-slate-700 text-slate-500 opacity-60'
             }`}
           >
-            <Zap className="w-5 h-5 fill-current animate-pulse" />
-            <span>{boostReady ? 'SLAM DASH!' : 'CHARGING...'}</span>
+            <Zap className="w-6 h-6 fill-current animate-pulse" />
+            <span className="text-sm font-extrabold">{boostReady ? 'SLAM DASH!' : 'CHARGING'}</span>
           </button>
         </div>
       </div>

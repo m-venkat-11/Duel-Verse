@@ -35,6 +35,7 @@ export const PongView: React.FC<PongViewProps> = ({
   const p2Score = room.scores[topUid] || 0;
 
   const [lastScorerName, setLastScorerName] = useState<string | null>(null);
+  const lastScorerNameRef = useRef<string | null>(null);
 
   // References for game loop state
   const stateRef = useRef(gameState);
@@ -43,6 +44,7 @@ export const PongView: React.FC<PongViewProps> = ({
   scoresRef.current = { p1Score, p2Score };
 
   const pointerXPercentRef = useRef<number | null>(null);
+  const pongTargetRef = useRef<{ x: number; y: number } | null>(null);
   const keysDown = useRef<{ [key: string]: boolean }>({});
   const mobileSteer = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
 
@@ -72,17 +74,24 @@ export const PongView: React.FC<PongViewProps> = ({
     const input = new InputManager();
     input.attach(canvas);
 
-    // Direct 2D pointer tracking (move anywhere across your defensive half!)
+    // Direct 2D pointer tracking for the player's own defensive half
     const handleDirectPointer = (e: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
       const rawX = ((e.clientX - rect.left) / rect.width) * 100;
       const rawY = ((e.clientY - rect.top) / rect.height) * 100;
       pointerXPercentRef.current = Math.max(12, Math.min(88, rawX));
-      // Store 2D target
-      (window as any).__pongTarget = {
-        x: Math.max(12, Math.min(88, rawX)),
-        y: Math.max(53, Math.min(92, rawY))
-      };
+      // Bottom player controls bottom half; top player controls top half
+      if (isBottomPlayer) {
+        pongTargetRef.current = {
+          x: Math.max(12, Math.min(88, rawX)),
+          y: Math.max(53, Math.min(92, rawY))
+        };
+      } else {
+        pongTargetRef.current = {
+          x: Math.max(12, Math.min(88, rawX)),
+          y: Math.max(8, Math.min(47, rawY))
+        };
+      }
     };
 
     canvas.addEventListener('pointermove', handleDirectPointer);
@@ -238,6 +247,7 @@ export const PongView: React.FC<PongViewProps> = ({
         sim.goalPauseTimer -= dt;
         if (sim.goalPauseTimer <= 0) {
           sim.isGoalScored = false;
+          lastScorerNameRef.current = null;
           setLastScorerName(null);
           // Serve towards the player who was scored against
           sim.vx = (Math.random() > 0.5 ? 1 : -1) * (0.35 + Math.random() * 0.2);
@@ -257,7 +267,7 @@ export const PongView: React.FC<PongViewProps> = ({
       let targetX = cur.x;
       let targetY = cur.y;
 
-      const target2D = (window as any).__pongTarget;
+      const target2D = pongTargetRef.current;
       if (target2D) {
         targetX = target2D.x;
         targetY = target2D.y;
@@ -308,8 +318,8 @@ export const PongView: React.FC<PongViewProps> = ({
         botPaddle.vy = botPaddle.y - prevBotY;
       }
 
-      // 4. Host Physics Simulation with Continuous Swept Sub-stepping
-      if (isHost) {
+      // 4. ALL CLIENTS run local physics simulation (host dispatches goals only)
+      {
         const SUB_STEPS = 4;
         const subDt = dt / SUB_STEPS;
         const malletRadius = 11; // % of court width
@@ -399,12 +409,14 @@ export const PongView: React.FC<PongViewProps> = ({
             sim.puckY = 50;
             sim.vx = 0;
             sim.vy = 0;
+            lastScorerNameRef.current = p1Nickname;
             setLastScorerName(p1Nickname);
 
             juice.addTrauma(0.65);
             juice.emitExplosion((sim.puckX / 100) * W, 20, 50);
             soundService.playGoal();
-            onDispatchAction('PONG_GOAL', { scorerUid: bottomUid, actingUid: bottomUid });
+            // Only host dispatches network event to avoid duplicate scoring
+            if (isHost) onDispatchAction('PONG_GOAL', { scorerUid: bottomUid, actingUid: bottomUid });
             break;
           }
 
@@ -416,12 +428,14 @@ export const PongView: React.FC<PongViewProps> = ({
             sim.puckY = 50;
             sim.vx = 0;
             sim.vy = 0;
+            lastScorerNameRef.current = p2Nickname;
             setLastScorerName(p2Nickname);
 
             juice.addTrauma(0.65);
             juice.emitExplosion((sim.puckX / 100) * W, H - 20, 50);
             soundService.playGoal();
-            onDispatchAction('PONG_GOAL', { scorerUid: topUid, actingUid: topUid });
+            // Only host dispatches network event to avoid duplicate scoring
+            if (isHost) onDispatchAction('PONG_GOAL', { scorerUid: topUid, actingUid: topUid });
             break;
           }
         }
@@ -461,16 +475,20 @@ export const PongView: React.FC<PongViewProps> = ({
         ctx.drawImage(staticCourt, 0, 0, W, H);
       }
 
-      // 2. Integrated Digital Scoreboard on Acrylic Table
+      // 2. Neon Score Overlay (bright, readable)
       const scores = scoresRef.current;
-      ctx.font = `900 68px "Outfit", sans-serif`;
+      ctx.font = `900 72px "Outfit", sans-serif`;
       ctx.textAlign = 'center';
-      // P2 Score (Top Red)
-      ctx.fillStyle = 'rgba(244, 63, 94, 0.22)';
-      ctx.fillText(String(scores.p2Score), W / 2, H / 2 - 32);
-      // P1 Score (Bottom Gold)
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.22)';
-      ctx.fillText(String(scores.p1Score), W / 2, H / 2 + 78);
+      ctx.shadowBlur = 28;
+      // P2 Score (Top - red)
+      ctx.shadowColor = '#f43f5e';
+      ctx.fillStyle = 'rgba(244, 63, 94, 0.72)';
+      ctx.fillText(String(scores.p2Score), W / 2, H / 2 - 28);
+      // P1 Score (Bottom - gold)
+      ctx.shadowColor = '#f59e0b';
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.72)';
+      ctx.fillText(String(scores.p1Score), W / 2, H / 2 + 82);
+      ctx.shadowBlur = 0;
 
       // 3. Draw Puck Motion Trail
       for (let i = 0; i < TRAIL_LENGTH; i++) {
@@ -516,6 +534,12 @@ export const PongView: React.FC<PongViewProps> = ({
       ctx.arc(topPX, topPY, 10, 0, Math.PI * 2);
       ctx.fill();
 
+      // "YOU" or Opponent label above top mallet
+      ctx.font = `bold 11px "JetBrains Mono", monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = isBottomPlayer ? '#f43f5e' : '#ffffff';
+      ctx.fillText(isBottomPlayer ? (p2Nickname.substring(0,8)) : '▲ YOU', topPX, topPY - 36);
+
       // Draw Bottom Mallet (Gold / Local Player)
       // Mallet Drop Shadow
       ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
@@ -541,6 +565,12 @@ export const PongView: React.FC<PongViewProps> = ({
       ctx.beginPath();
       ctx.arc(botPX, botPY, 10, 0, Math.PI * 2);
       ctx.fill();
+
+      // "YOU" label above bottom mallet
+      ctx.font = `bold 11px "JetBrains Mono", monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = isBottomPlayer ? '#ffffff' : '#f59e0b';
+      ctx.fillText(isBottomPlayer ? '▼ YOU' : (p1Nickname.substring(0,8)), botPX, botPY + 46);
 
       // 5. Render 3D Air Hockey Puck
       const renderPuckX = ((sim.prevPuckX + (sim.puckX - sim.prevPuckX) * alpha) / 100) * W;
@@ -583,7 +613,8 @@ export const PongView: React.FC<PongViewProps> = ({
       juice.renderParticles(ctx, alpha);
 
       // 7. Goal Scored Celebration Overlay
-      if (sim.isGoalScored && lastScorerName) {
+      const curScorer = lastScorerNameRef.current || lastScorerName;
+      if (sim.isGoalScored && curScorer) {
         ctx.fillStyle = 'rgba(3, 6, 17, 0.65)';
         ctx.fillRect(0, 0, W, H);
 
@@ -597,7 +628,7 @@ export const PongView: React.FC<PongViewProps> = ({
 
         ctx.font = `700 18px "Outfit", sans-serif`;
         ctx.fillStyle = '#ffffff';
-        ctx.fillText(`${lastScorerName} SCORED!`, W / 2, H / 2 + 32);
+        ctx.fillText(`${curScorer} SCORED!`, W / 2, H / 2 + 32);
 
         ctx.font = `900 22px "JetBrains Mono", monospace`;
         ctx.fillStyle = '#06b6d4';
@@ -653,6 +684,26 @@ export const PongView: React.FC<PongViewProps> = ({
         }}
       >
         <canvas ref={canvasRef} className="w-full h-full block" />
+      </div>
+
+      {/* Mobile Paddle Touch Controls (Supplementary to direct canvas touch) */}
+      <div className="w-full grid grid-cols-2 gap-3 max-w-md pt-0.5">
+        <button
+          onPointerDown={() => { mobileSteer.current.left = true; }}
+          onPointerUp={() => { mobileSteer.current.left = false; }}
+          onPointerLeave={() => { mobileSteer.current.left = false; }}
+          className="h-12 rounded-xl bg-slate-900/90 border border-cyan-500/40 active:bg-cyan-600/30 active:scale-95 text-xs font-black font-mono text-cyan-300 flex items-center justify-center gap-2 shadow-lg touch-manipulation"
+        >
+          <span>◀ SLIDE LEFT</span>
+        </button>
+        <button
+          onPointerDown={() => { mobileSteer.current.right = true; }}
+          onPointerUp={() => { mobileSteer.current.right = false; }}
+          onPointerLeave={() => { mobileSteer.current.right = false; }}
+          className="h-12 rounded-xl bg-slate-900/90 border border-cyan-500/40 active:bg-cyan-600/30 active:scale-95 text-xs font-black font-mono text-cyan-300 flex items-center justify-center gap-2 shadow-lg touch-manipulation"
+        >
+          <span>SLIDE RIGHT ▶</span>
+        </button>
       </div>
 
       {/* Bottom Player (You) HUD Bar */}
