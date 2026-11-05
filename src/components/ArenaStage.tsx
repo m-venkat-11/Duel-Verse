@@ -122,11 +122,11 @@ export const ArenaStage: React.FC<ArenaStageProps> = ({
               soundService.playClick();
               onLeaveRoom();
             }}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-violet-600/30 hover:bg-violet-600/50 border border-violet-400/50 text-white font-['Outfit'] font-black text-xs active:scale-95 transition shrink-0 shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-600/40 hover:bg-violet-600/70 border border-violet-400/60 text-white font-['Outfit'] font-black text-xs sm:text-sm active:scale-95 transition shrink-0 shadow-md shadow-violet-600/30 touch-manipulation"
             title="Exit match and return to arcade library"
           >
-            <ArrowLeft className="w-3.5 h-3.5 text-violet-300 stroke-[3]" />
-            <span className="hidden xs:inline">Arcade</span>
+            <ArrowLeft className="w-4 h-4 text-violet-300 stroke-[3]" />
+            <span>Arcade</span>
           </button>
           
           {/* Player 1 Quick Pill */}

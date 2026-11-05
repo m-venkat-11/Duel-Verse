@@ -56,7 +56,7 @@ export function registerTugTap(
   }
 
   const isP1 = playerUid === p1Uid;
-  const pushDelta = (isP1 ? -3.4 : 3.4) * multiplier;
+  const pushDelta = (isP1 ? -5.2 : 5.2) * multiplier;
   const nextPos = Math.max(-100, Math.min(100, state.tugPosition + pushDelta));
 
   const nextP1Taps = isP1 ? state.p1Taps + 1 : state.p1Taps;

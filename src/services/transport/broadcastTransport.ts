@@ -9,7 +9,7 @@ import { updatePongPaddle, stepPongPhysics, resetPongServe } from '../../engine/
 import { flipMemoryCard, clearPlayerFlips } from '../../engine/memoryMatchEngine';
 import { submitBlitzAnswer } from '../../engine/numberBlitzEngine';
 import { registerTugTap, resetTapWarRound } from '../../engine/tapFrenzyEngine';
-import { switchRunnerLane, registerRunnerFinish } from '../../engine/obstacleRushEngine';
+import { switchRunnerLane, registerRunnerFinish, createObstacleRushInitialState } from '../../engine/obstacleRushEngine';
 import { registerTankKill } from '../../engine/tankDuelEngine';
 import { registerSlapStrike, registerFalseDodge } from '../../engine/slapDuelEngine';
 import { registerKnifeThrow, createKnifeMasterInitialState } from '../../engine/knifeMasterEngine';
@@ -429,8 +429,11 @@ export class BroadcastTransport implements IRoomTransport {
         const res = commitRPSChoice(room.gameState, playerUid, choice, playerUids);
         room.gameState = res.newState;
 
+        if (res.roundOver && res.roundWinnerUid && res.roundWinnerUid !== 'draw') {
+          room.scores[res.roundWinnerUid] = (room.scores[res.roundWinnerUid] || 0) + 1;
+        }
+
         if (res.matchOver && res.matchWinnerUid) {
-          room.scores[res.matchWinnerUid] = (room.scores[res.matchWinnerUid] || 0) + 1;
           room.roundWinnerUid = res.matchWinnerUid;
           room.status = 'match_end';
           room.matchWinnerUid = res.matchWinnerUid;
@@ -440,6 +443,8 @@ export class BroadcastTransport implements IRoomTransport {
           setTimeout(() => {
             const currentRoom = this.getStoredRoom(action.roomId);
             if (currentRoom && currentRoom.status === 'playing') {
+              currentRoom.currentRound += 1;
+              currentRoom.roundWinnerUid = null;
               currentRoom.gameState = resetRPSNextRound(currentRoom.gameState);
               this.saveAndBroadcast(currentRoom);
             }
@@ -628,6 +633,8 @@ export class BroadcastTransport implements IRoomTransport {
             setTimeout(() => {
               const currentRoom = this.getStoredRoom(action.roomId);
               if (currentRoom && currentRoom.status === 'playing') {
+                currentRoom.currentRound += 1;
+                currentRoom.roundWinnerUid = null;
                 currentRoom.gameState = resetTapWarRound(currentRoom.gameState);
                 this.saveAndBroadcast(currentRoom);
               }
@@ -654,6 +661,17 @@ export class BroadcastTransport implements IRoomTransport {
           if (res.matchOver || room.scores[winnerUid] >= targetWins) {
             room.status = 'match_end';
             room.matchWinnerUid = winnerUid;
+          } else {
+            // Auto advance to next race round in 2 seconds
+            setTimeout(() => {
+              const currentRoom = this.getStoredRoom(action.roomId);
+              if (currentRoom && currentRoom.status === 'playing') {
+                currentRoom.currentRound += 1;
+                currentRoom.roundWinnerUid = null;
+                currentRoom.gameState = createObstacleRushInitialState(playerUids, targetWins);
+                this.saveAndBroadcast(currentRoom);
+              }
+            }, 2000);
           }
         }
         break;
@@ -716,9 +734,24 @@ export class BroadcastTransport implements IRoomTransport {
 
         if (res.winnerUid && room.players[res.winnerUid]) {
           room.scores[res.winnerUid] = (room.scores[res.winnerUid] || 0) + 1;
-          if (res.matchOver) {
+          const targetScore = room.maxRounds || room.gameState?.targetScore || 3;
+          if (res.matchOver || room.scores[res.winnerUid] >= targetScore) {
             room.status = 'match_end';
-            room.matchWinnerUid = res.matchWinnerUid;
+            room.matchWinnerUid = res.matchWinnerUid || res.winnerUid;
+          } else {
+            // Auto advance next sumo round in 1.8 seconds
+            setTimeout(() => {
+              const currentRoom = this.getStoredRoom(action.roomId);
+              if (currentRoom && currentRoom.status === 'playing') {
+                currentRoom.currentRound += 1;
+                currentRoom.roundWinnerUid = null;
+                currentRoom.gameState = {
+                  ...currentRoom.gameState,
+                  roundWinner: null
+                };
+                this.saveAndBroadcast(currentRoom);
+              }
+            }, 1800);
           }
         }
         break;

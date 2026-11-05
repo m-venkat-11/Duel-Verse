@@ -123,13 +123,13 @@ export const GameArtwork: React.FC<GameArtworkProps> = ({
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-white/10 pointer-events-none" />
 
       {/* Corner Indicator */}
-      {gameId === 'flappyspidey' || gameId === 'cyber2048' || gameId === 'cybersudoku' ? (
-        <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-violet-950/85 backdrop-blur-md border border-violet-400/50 text-[9px] font-black uppercase tracking-widest text-violet-200 font-mono shadow-sm">
+      {gameId === 'flappyspidey' || gameId === 'cyber2048' || gameId === 'cybersudoku' || gameId.includes('spidey') || gameId.includes('2048') || gameId.includes('sudoku') ? (
+        <div className="absolute top-2 left-2 px-2.5 py-1 rounded-md bg-violet-950/90 backdrop-blur-md border border-violet-400/60 text-[10px] font-black uppercase tracking-wider text-violet-200 font-mono shadow-md">
           🕹️ SOLO
         </div>
       ) : (
-        <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-md border border-white/20 text-[9px] font-black uppercase tracking-widest text-white font-mono shadow-sm">
-          1v1 LIVE
+        <div className="absolute top-2 left-2 px-2.5 py-1 rounded-md bg-black/70 backdrop-blur-md border border-white/20 text-[10px] font-black uppercase tracking-wider text-white font-mono shadow-md">
+          ⚔️ 1v1 LIVE
         </div>
       )}
     </div>

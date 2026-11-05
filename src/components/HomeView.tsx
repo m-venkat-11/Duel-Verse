@@ -42,6 +42,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
       onCreateRoom(g.id, 1, false);
       return;
     }
+    if (withBot) {
+      // 1-Click Instant Play vs CyberBot: zero friction, launches immediately!
+      onCreateRoom(g.id, 3, true);
+      return;
+    }
     setSetupGame(g);
     setSetupWithBot(withBot);
     setSetupPoints(3);

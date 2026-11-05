@@ -76,6 +76,7 @@ export const PongView: React.FC<PongViewProps> = ({
 
     // Direct 2D pointer tracking for the player's own defensive half
     const handleDirectPointer = (e: PointerEvent) => {
+      try { canvas.setPointerCapture(e.pointerId); } catch {}
       const rect = canvas.getBoundingClientRect();
       const rawX = ((e.clientX - rect.left) / rect.width) * 100;
       const rawY = ((e.clientY - rect.top) / rect.height) * 100;
@@ -276,8 +277,14 @@ export const PongView: React.FC<PongViewProps> = ({
       const isKeyLeft = keysDown.current['a'] || keysDown.current['arrowleft'] || mobileSteer.current.left;
       const isKeyRight = keysDown.current['d'] || keysDown.current['arrowright'] || mobileSteer.current.right;
 
-      if (isKeyLeft) targetX = Math.max(12, cur.x - 3.5);
-      if (isKeyRight) targetX = Math.min(88, cur.x + 3.5);
+      if (isKeyLeft) {
+        pongTargetRef.current = null;
+        targetX = Math.max(12, cur.x - 3.8);
+      }
+      if (isKeyRight) {
+        pongTargetRef.current = null;
+        targetX = Math.min(88, cur.x + 3.8);
+      }
 
       const prevX = cur.x;
       const prevY = cur.y;
@@ -291,6 +298,15 @@ export const PongView: React.FC<PongViewProps> = ({
       if (now - sim.lastPaddleDispatchTime > 30) {
         sim.lastPaddleDispatchTime = now;
         onDispatchAction('PONG_PADDLE', { xPos: cur.x, yPos: cur.y });
+      }
+
+      // Sync remote opponent paddle in 2P network matches
+      if (!isBotPlaying) {
+        const oppUid = isBottomPlayer ? topUid : bottomUid;
+        const remoteX = stateRef.current?.paddles?.[oppUid];
+        if (typeof remoteX === 'number') {
+          sim.paddles[oppUid].x += (remoteX - sim.paddles[oppUid].x) * 0.45;
+        }
       }
 
       // 3. CyberBot Air Hockey AI (Aggressive 2D Striker & Goal Defender)

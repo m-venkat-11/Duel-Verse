@@ -35,6 +35,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
   const [roundWinnerName, setRoundWinnerName] = useState<string | null>(null);
   const roundWinnerNameRef = useRef<string | null>(null);
   const [boostReady, setBoostReady] = useState<boolean>(true);
+  const boostReadyRef = useRef<boolean>(true);
 
   // Input states
   const keysDown = useRef<{ [key: string]: boolean }>({});
@@ -117,14 +118,23 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
     };
 
     const touchDrag = { active: false, startX: 0, startY: 0, currX: 0, currY: 0 };
+    // Cache canvas rect to avoid getBoundingClientRect on every pointermove
+    let cachedRect = canvas.getBoundingClientRect();
+    let scaleX = W / Math.max(1, cachedRect.width);
+    let scaleY = H / Math.max(1, cachedRect.height);
+    const refreshScale = () => {
+      cachedRect = canvas.getBoundingClientRect();
+      scaleX = W / Math.max(1, cachedRect.width);
+      scaleY = H / Math.max(1, cachedRect.height);
+    };
+    window.addEventListener('resize', refreshScale, { passive: true });
 
     const handleCanvasPointerDown = (e: PointerEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = W / rect.width;
-      const scaleY = H / rect.height;
-      const px = (e.clientX - rect.left) * scaleX;
-      const py = (e.clientY - rect.top) * scaleY;
-
+      // Use pointer capture so pointermove fires on canvas even if finger leaves it
+      canvas.setPointerCapture(e.pointerId);
+      refreshScale();
+      const px = (e.clientX - cachedRect.left) * scaleX;
+      const py = (e.clientY - cachedRect.top) * scaleY;
       touchDrag.active = true;
       touchDrag.startX = px;
       touchDrag.startY = py;
@@ -132,23 +142,23 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
       touchDrag.currY = py;
     };
 
+    // pointermove on canvas only (setPointerCapture routes captured events here)
     const handleCanvasPointerMove = (e: PointerEvent) => {
       if (!touchDrag.active) return;
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = W / rect.width;
-      const scaleY = H / rect.height;
-      touchDrag.currX = (e.clientX - rect.left) * scaleX;
-      touchDrag.currY = (e.clientY - rect.top) * scaleY;
+      touchDrag.currX = (e.clientX - cachedRect.left) * scaleX;
+      touchDrag.currY = (e.clientY - cachedRect.top) * scaleY;
     };
 
     const handleCanvasPointerUp = () => {
       touchDrag.active = false;
+      touchDrag.currX = touchDrag.startX;
+      touchDrag.currY = touchDrag.startY;
     };
 
     canvas.addEventListener('pointerdown', handleCanvasPointerDown);
-    window.addEventListener('pointermove', handleCanvasPointerMove);
-    window.addEventListener('pointerup', handleCanvasPointerUp);
-    window.addEventListener('pointercancel', handleCanvasPointerUp);
+    canvas.addEventListener('pointermove', handleCanvasPointerMove);
+    canvas.addEventListener('pointerup', handleCanvasPointerUp);
+    canvas.addEventListener('pointercancel', handleCanvasPointerUp);
 
     const update = (dt: number) => {
       juice.update(dt);
@@ -165,7 +175,12 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
       const mySpin = spinners[playerUid];
       if (mySpin && mySpin.alive) {
         mySpin.boostCooldown = Math.max(0, mySpin.boostCooldown - dt);
-        setBoostReady(mySpin.boostCooldown === 0);
+        // Only update React state when value actually changes (prevents 60 re-renders/sec)
+        const isNowReady = mySpin.boostCooldown === 0;
+        if (isNowReady !== boostReadyRef.current) {
+          boostReadyRef.current = isNowReady;
+          setBoostReady(isNowReady);
+        }
 
         let steerX = 0;
         let steerY = 0;
@@ -325,9 +340,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
           juice.emitExplosion(spin.x, spin.y, 60);
           soundService.playGoal();
 
-          if (isHost) {
-            onDispatchAction('SUMO_RING_OUT', { fallenUid: uid, playerUid: victorUid, actingUid: victorUid });
-          }
+          onDispatchAction('SUMO_RING_OUT', { fallenUid: uid, playerUid: victorUid, actingUid: victorUid });
           break;
         }
       }
@@ -533,11 +546,18 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
     const loop = new GameLoop({ update, render });
     loop.start();
 
-    return () => loop.stop();
+    return () => {
+      loop.stop();
+      window.removeEventListener('resize', refreshScale);
+      canvas.removeEventListener('pointerdown', handleCanvasPointerDown);
+      canvas.removeEventListener('pointermove', handleCanvasPointerMove);
+      canvas.removeEventListener('pointerup', handleCanvasPointerUp);
+      canvas.removeEventListener('pointercancel', handleCanvasPointerUp);
+    };
   }, [p1Uid, p2Uid, isHost, isBotPlaying, p1Nickname, p2Nickname, onDispatchAction]);
 
-  const p1Score = gameState.scores?.[p1Uid] || 0;
-  const p2Score = gameState.scores?.[p2Uid] || 0;
+  const p1Score = room.scores[p1Uid] ?? gameState.scores?.[p1Uid] ?? 0;
+  const p2Score = room.scores[p2Uid] ?? gameState.scores?.[p2Uid] ?? 0;
 
   return (
     <div ref={containerRef} className="w-full max-w-2xl mx-auto flex flex-col items-center select-none gap-2.5 px-2">
@@ -572,6 +592,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
           <button
             onPointerDown={() => { mobileInput.current.up = true; }}
             onPointerUp={() => { mobileInput.current.up = false; }}
+            onPointerCancel={() => { mobileInput.current.up = false; }}
             onPointerLeave={() => { mobileInput.current.up = false; }}
             className="w-11 h-11 rounded-xl bg-slate-800 active:bg-violet-600 border border-slate-700 flex items-center justify-center text-slate-200 active:text-white shadow active:scale-95 touch-manipulation"
           >
@@ -582,6 +603,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
           <button
             onPointerDown={() => { mobileInput.current.left = true; }}
             onPointerUp={() => { mobileInput.current.left = false; }}
+            onPointerCancel={() => { mobileInput.current.left = false; }}
             onPointerLeave={() => { mobileInput.current.left = false; }}
             className="w-11 h-11 rounded-xl bg-slate-800 active:bg-violet-600 border border-slate-700 flex items-center justify-center text-slate-200 active:text-white shadow active:scale-95 touch-manipulation"
           >
@@ -590,6 +612,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
           <button
             onPointerDown={() => { mobileInput.current.down = true; }}
             onPointerUp={() => { mobileInput.current.down = false; }}
+            onPointerCancel={() => { mobileInput.current.down = false; }}
             onPointerLeave={() => { mobileInput.current.down = false; }}
             className="w-11 h-11 rounded-xl bg-slate-800 active:bg-violet-600 border border-slate-700 flex items-center justify-center text-slate-200 active:text-white shadow active:scale-95 touch-manipulation"
           >
@@ -598,6 +621,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({
           <button
             onPointerDown={() => { mobileInput.current.right = true; }}
             onPointerUp={() => { mobileInput.current.right = false; }}
+            onPointerCancel={() => { mobileInput.current.right = false; }}
             onPointerLeave={() => { mobileInput.current.right = false; }}
             className="w-11 h-11 rounded-xl bg-slate-800 active:bg-violet-600 border border-slate-700 flex items-center justify-center text-slate-200 active:text-white shadow active:scale-95 touch-manipulation"
           >

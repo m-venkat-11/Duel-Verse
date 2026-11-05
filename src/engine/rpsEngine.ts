@@ -50,7 +50,17 @@ export function commitRPSChoice(
   const newCommits = { ...state.commits, [playerUid]: 'COMMITTED' };
   const newChoices = { ...state.choices, [playerUid]: choice };
 
-  const [p1, p2] = playerUids;
+  const p1 = playerUids[0] || playerUid;
+  const p2 = playerUids[1] || (playerUid === 'bot_rival' ? 'p1' : 'bot_rival');
+
+  // If opponent is a bot and hasn't committed yet, auto-commit for the bot so it never stalls!
+  if ((p2 === 'bot_rival' || p2.startsWith('bot_') || playerUids.length < 2) && !newChoices[p2]) {
+    const rpsOptions: RPSChoice[] = ['rock', 'paper', 'scissors'];
+    const botPick = rpsOptions[Math.floor(Math.random() * 3)];
+    newCommits[p2] = 'COMMITTED';
+    newChoices[p2] = botPick;
+  }
+
   const bothCommitted = Boolean(p1 && p2 && newChoices[p1] && newChoices[p2]);
 
   if (!bothCommitted) {

@@ -42,22 +42,22 @@ export function createObstacleRushInitialState(playerUids: string[], targetWins:
     scores[uid] = 0;
   });
 
-  // Generate deterministic course hazards from 50m to 950m
+  // Generate deterministic course hazards from 40m to 470m
   const hazards: RunnerHazard[] = [];
   let hId = 1;
-  for (let dist = 60; dist < 940; dist += 45) {
+  for (let dist = 40; dist < 470; dist += 35) {
     const lane = (dist * 7 + 3) % 3;
-    const isBoost = (dist % 90) === 0;
+    const isBoost = (dist % 70) === 0;
     hazards.push({
       id: hId++,
       distance: dist,
       lane,
-      type: isBoost ? 'boost' : (dist % 120 === 0 ? 'emp' : 'barrier')
+      type: isBoost ? 'boost' : (dist % 105 === 0 ? 'emp' : 'barrier')
     });
   }
 
   return {
-    courseLength: 1000,
+    courseLength: 500,
     players,
     hazards,
     startTime: Date.now() + 1000,

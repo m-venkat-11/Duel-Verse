@@ -20,10 +20,10 @@ export const RPSView: React.FC<RPSViewProps> = ({ room, playerUid, onDispatchAct
   const gameState = room.gameState;
   const myCommit   = gameState.commits?.[playerUid];
   const myChoice   = gameState.choices?.[playerUid] as RPSChoice | null;
-  const opponentUid    = Object.keys(room.players).find((uid) => uid !== playerUid);
+  const opponentUid    = Object.keys(room.players).find((uid) => uid !== playerUid) || 'bot_rival';
   const opponentCommit = opponentUid ? gameState.commits?.[opponentUid] : null;
   const opponentChoice = opponentUid ? (gameState.choices?.[opponentUid] as RPSChoice | null) : null;
-  const opponent        = opponentUid ? room.players[opponentUid] : null;
+  const opponent        = (opponentUid && room.players[opponentUid]) || { uid: 'bot_rival', nickname: 'CyberBot ⚡', avatarId: '🤖' };
 
   const juiceRef = useRef<JuiceEngine | null>(null);
   if (!juiceRef.current) juiceRef.current = new JuiceEngine(100);
@@ -38,9 +38,9 @@ export const RPSView: React.FC<RPSViewProps> = ({ room, playerUid, onDispatchAct
   const isDraw   = gameState.roundWinner === 'draw';
 
   // Scores
-  const p1Wins = gameState.roundScores?.[playerUid] || 0;
-  const p2Wins = opponentUid ? (gameState.roundScores?.[opponentUid] || 0) : 0;
-  const targetWins = gameState.targetWins || 3;
+  const p1Wins = room.scores[playerUid] ?? gameState.roundScores?.[playerUid] ?? 0;
+  const p2Wins = opponentUid ? (room.scores[opponentUid] ?? gameState.roundScores?.[opponentUid] ?? 0) : 0;
+  const targetWins = room.maxRounds || gameState.targetWins || 3;
 
   useEffect(() => {
     if (gameState.phase === 'revealed') {

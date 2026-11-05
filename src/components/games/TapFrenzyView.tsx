@@ -130,18 +130,18 @@ export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({ room, playerUid, o
     return () => window.removeEventListener('keydown', onKey);
   }, [isP1, gameState.roundWinner]);
 
-  // CyberBot AI mashing
+  // CyberBot AI balanced mashing (~4.5 CPS so human can beat it with good mashing)
   useEffect(() => {
     if (!isHost || !isBotPlaying || gameState.roundWinner !== null) return;
     const id = setInterval(() => {
-      if (Math.random() < 0.88)
+      if (Math.random() < 0.68)
         onDispatchAction('TAP_WAR_MASH', { playerUid: p2Uid, actingUid: p2Uid, p1Uid, multiplier: 1.0 });
-    }, 108);
+    }, 155);
     return () => clearInterval(id);
   }, [isHost, isBotPlaying, p1Uid, p2Uid, gameState.roundWinner, onDispatchAction]);
 
-  const p1Wins = gameState.scores?.[p1Uid] || 0;
-  const p2Wins = gameState.scores?.[p2Uid] || 0;
+  const p1Wins = room.scores[p1Uid] ?? gameState.scores?.[p1Uid] ?? 0;
+  const p2Wins = room.scores[p2Uid] ?? gameState.scores?.[p2Uid] ?? 0;
   const targetWins = room.maxRounds || gameState.targetWins || 3;
 
   const cpsMax = 12;
@@ -162,12 +162,10 @@ export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({ room, playerUid, o
           </div>
         </div>
 
-        {/* Timer */}
-        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border font-mono text-[11px] transition-all ${
-          isLastSeconds ? 'bg-rose-600/30 text-rose-300 border-rose-500/60 animate-pulse' : 'bg-violet-600/20 text-violet-300 border-violet-500/40'
-        }`}>
-          <Zap className="w-3.5 h-3.5 animate-pulse" />
-          <span>⏱ {gameState.roundWinner ? 'DONE' : `${timeLeft}s`}</span>
+        {/* Round Badge */}
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-violet-500/40 bg-violet-600/20 text-violet-300 font-mono text-[11px]">
+          <Zap className="w-3.5 h-3.5 animate-pulse text-amber-400" />
+          <span>ROUND {gameState.roundNumber || 1} • FIRST TO {targetWins}</span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -261,7 +259,7 @@ export const TapFrenzyView: React.FC<TapFrenzyViewProps> = ({ room, playerUid, o
           ref={btnRef}
           onPointerDown={handleTap}
           disabled={gameState.roundWinner !== null}
-          className={`w-full h-44 sm:h-52 rounded-3xl relative overflow-hidden transition-all duration-75 shadow-2xl active:scale-95 border-4 select-none ${
+          className={`w-full h-44 sm:h-52 rounded-3xl relative overflow-hidden transition-all duration-75 shadow-2xl active:scale-95 border-4 select-none touch-manipulation ${
             isP1
               ? 'bg-gradient-to-b from-amber-500 via-orange-500 to-amber-700 border-amber-300 shadow-amber-500/40'
               : 'bg-gradient-to-b from-cyan-400 via-sky-500 to-blue-700 border-cyan-200 shadow-cyan-500/40'
