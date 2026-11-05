@@ -544,7 +544,7 @@ export class BroadcastTransport implements IRoomTransport {
       // --- Pong Goal (Authoritative) ---
       case 'PONG_GOAL': {
         const { scorerUid } = payload;
-        if (scorerUid && room.players[scorerUid]) {
+        if (scorerUid) {
           room.scores[scorerUid] = (room.scores[scorerUid] || 0) + 1;
           const targetScore = room.maxRounds || room.gameState?.targetScore || 5;
           if (room.scores[scorerUid] >= targetScore) {
@@ -655,7 +655,7 @@ export class BroadcastTransport implements IRoomTransport {
         const { winnerUid } = payload;
         const res = registerRunnerFinish(room.gameState, winnerUid);
         room.gameState = res.newState;
-        if (winnerUid && room.players[winnerUid]) {
+        if (winnerUid) {
           room.scores[winnerUid] = (room.scores[winnerUid] || 0) + 1;
           const targetWins = room.maxRounds || room.gameState?.targetWins || 3;
           if (res.matchOver || room.scores[winnerUid] >= targetWins) {
