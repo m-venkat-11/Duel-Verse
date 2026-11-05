@@ -111,12 +111,11 @@ export const ArenaStage: React.FC<ArenaStageProps> = ({
   return (
     <div className="w-full max-w-7xl mx-auto flex flex-col items-center px-2 sm:px-4 lg:px-6">
       {/* ======================================================== */}
-      {/* 1. TOP ARCADE MATCH HEADER                               */}
-      {/* ======================================================== */}
-      <div className="w-full mb-3 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border border-white/10 p-2 sm:p-3 shadow-2xl backdrop-blur-xl">
-        <div className="flex items-center justify-between gap-1.5 sm:gap-4">
-
-          {/* Quick Exit/Surrender Button for Mobile */}
+      {/* 1. TOP ARCADE MATCH HEADER */}
+      <div className="w-full mb-2 sm:mb-3 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border border-white/10 p-2 sm:p-3 shadow-2xl backdrop-blur-xl">
+        {/* Desktop / Tablet Layout (>= sm) */}
+        <div className="hidden sm:flex items-center justify-between gap-2 sm:gap-4">
+          {/* Quick Exit/Surrender Button */}
           <button
             onClick={() => {
               soundService.playClick();
@@ -203,7 +202,41 @@ export const ArenaStage: React.FC<ArenaStageProps> = ({
               )}
             </div>
           </div>
+        </div>
 
+        {/* Mobile Viewport-Optimized Scoreboard (< sm) */}
+        <div className="flex sm:hidden items-center justify-between gap-1.5">
+          <button
+            onClick={() => {
+              soundService.playClick();
+              onLeaveRoom();
+            }}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-violet-600/40 border border-violet-400/50 text-white font-['Outfit'] font-black text-xs active:scale-95 transition shrink-0"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 text-violet-300 stroke-[3]" />
+            <span>Arcade</span>
+          </button>
+
+          {/* Compact Duel Center Scores */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
+              <span className="text-sm">{p1?.avatarId || '👤'}</span>
+              <span className="text-lg font-black font-['Outfit'] text-amber-400 tabular-nums">{p1Score}</span>
+            </div>
+
+            <div className="px-2 py-0.5 rounded-full bg-slate-950 border border-white/10 text-[9px] font-mono text-slate-300 font-bold">
+              R{room.currentRound}/{room.maxRounds}
+            </div>
+
+            <div className="flex items-center gap-1">
+              <span className="text-lg font-black font-['Outfit'] text-cyan-400 tabular-nums">{p2Score}</span>
+              <span className="text-sm">{p2?.avatarId || '🤖'}</span>
+            </div>
+          </div>
+
+          <div className="text-[10px] font-mono font-bold text-slate-400 uppercase truncate max-w-[70px]">
+            {game.title}
+          </div>
         </div>
       </div>
 

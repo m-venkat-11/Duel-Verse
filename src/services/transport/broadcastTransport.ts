@@ -645,6 +645,19 @@ export class BroadcastTransport implements IRoomTransport {
       }
 
       // --- Obstacle Rush Runner ---
+      case 'RUNNER_POS': {
+        if (!room.gameState) room.gameState = {};
+        if (!room.gameState.runners) room.gameState.runners = {};
+        room.gameState.runners[playerUid] = {
+          x: payload.x,
+          y: payload.y,
+          z: payload.z ?? 0,
+          isJumping: payload.isJumping ?? false,
+          animPhase: payload.animPhase ?? 0
+        };
+        break;
+      }
+
       case 'RUNNER_LANE': {
         const { targetLane } = payload;
         room.gameState = switchRunnerLane(room.gameState, playerUid, targetLane);

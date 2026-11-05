@@ -4,7 +4,7 @@ import { GameLoop } from '../../engine/core/GameLoop';
 import { CanvasManager } from '../../engine/core/CanvasManager';
 import { JuiceEngine } from '../../engine/core/JuiceEngine';
 import { soundService } from '../../services/sound';
-import { Zap, ChevronLeft, ChevronRight, ArrowUp, Trophy } from 'lucide-react';
+import { Zap, ChevronLeft, ChevronRight, ArrowUp, Trophy, Flag } from 'lucide-react';
 
 interface ObstacleRushViewProps {
   room: AuthoritativeRoomState<any>;
@@ -16,7 +16,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const players = Object.keys(room.players);
-  const p1Uid = players[0] || 'p1';
+  const p1Uid = players[0] || playerUid;
   const p2Uid = players[1] || (p1Uid === 'bot_rival' ? 'player' : 'bot_rival');
   const isHost = room.hostUid === playerUid;
   const isBotPlaying = Boolean(room.players['bot_rival'] || p2Uid === 'bot_rival');
@@ -24,30 +24,35 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
   const p1Nickname = room.players[p1Uid]?.nickname || 'Player 1';
   const p2Nickname = room.players[p2Uid]?.nickname || 'CyberBot';
 
-  const [winnerName, setWinnerName] = useState<string | null>(null);
-  const winnerNameRef = useRef<string | null>(null);
+  const [raceWinner, setRaceWinner] = useState<string | null>(null);
+  const raceWinnerRef = useRef<string | null>(null);
   const finishDispatched = useRef<boolean>(false);
 
-  const [dashReady, setDashReady] = useState<boolean>(true);
-  const [dashCooldownPct, setDashCooldownPct] = useState<number>(0);
+  // Jump State
+  const [isJumpingState, setIsJumpingState] = useState<boolean>(false);
 
-  // Runners in world coordinates (Track: X: 40 to 480, Y: 100 to 2200)
+  // Runners in world coordinates (Track: X: 40 to 440, Y: 80 to 2000)
   const runners = useRef<{
     [uid: string]: {
       x: number;
       y: number;
+      z: number; // Vertical jump height
       vx: number;
       vy: number;
+      jumpTimer: number; // In air timer (0.5s duration)
+      isJumping: boolean;
       stunTimer: number;
       boostTimer: number;
-      dashTimer: number;
       animPhase: number;
     };
   }>({});
 
-  // Input states
+  const remoteRunners = useRef<{
+    [uid: string]: { x: number; y: number; z: number; isJumping: boolean; animPhase: number };
+  }>({});
+
   const keysDown = useRef<{ [key: string]: boolean }>({});
-  const mobileInput = useRef({ left: false, right: false, up: false, dash: false });
+  const mobileInput = useRef({ left: false, right: false, up: false, jump: false });
   const touchJoystick = useRef<{ active: boolean; startX: number; startY: number; currX: number; currY: number }>({
     active: false,
     startX: 0,
@@ -56,14 +61,20 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
     currY: 0
   });
 
-  const COURSE_LEN = 2100; // Finish line at Y = 2000
+  const lastNetworkDispatch = useRef<number>(0);
+  const COURSE_LEN = 2000;
+  const FINISH_Y = 1880;
 
-  // Keyboard navigation
+  // Keyboard controls (WASD, Arrows, Space to Jump)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      keysDown.current[e.key.toLowerCase()] = true;
-      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(e.key.toLowerCase())) {
+      const k = e.key.toLowerCase();
+      keysDown.current[k] = true;
+      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) {
         e.preventDefault();
+      }
+      if (k === ' ' || k === 'arrowup' || k === 'w') {
+        triggerJump();
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -77,48 +88,44 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
     };
   }, []);
 
+  // Listen for remote runner position updates in 2P multiplayer
+  useEffect(() => {
+    if (!isBotPlaying && room.gameState?.runners) {
+      const oppUid = p1Uid === playerUid ? p2Uid : p1Uid;
+      const remote = room.gameState.runners[oppUid];
+      if (remote) {
+        remoteRunners.current[oppUid] = remote;
+      }
+    }
+  }, [room.gameState?.runners, isBotPlaying, p1Uid, p2Uid, playerUid]);
+
   // Reset race state on round change
-  const resetRunners = () => {
+  const resetRace = () => {
     runners.current = {
-      [p1Uid]: { x: 190, y: 120, vx: 0, vy: 0, stunTimer: 0, boostTimer: 0, dashTimer: 0, animPhase: 0 },
-      [p2Uid]: { x: 330, y: 120, vx: 0, vy: 0, stunTimer: 0, boostTimer: 0, dashTimer: 0, animPhase: 0 }
+      [p1Uid]: { x: 160, y: 120, z: 0, vx: 0, vy: 0, jumpTimer: 0, isJumping: false, stunTimer: 0, boostTimer: 0, animPhase: 0 },
+      [p2Uid]: { x: 320, y: 120, z: 0, vx: 0, vy: 0, jumpTimer: 0, isJumping: false, stunTimer: 0, boostTimer: 0, animPhase: 0 }
     };
     finishDispatched.current = false;
-    winnerNameRef.current = null;
-    setWinnerName(null);
+    raceWinnerRef.current = null;
+    setRaceWinner(null);
   };
 
   useEffect(() => {
-    resetRunners();
+    resetRace();
   }, [room.currentRound, room.status, p1Uid, p2Uid]);
 
-  const handleTriggerDash = () => {
-    if (!dashReady || finishDispatched.current) return;
-    const myRunner = runners.current[playerUid];
-    if (!myRunner || myRunner.stunTimer > 0) return;
+  const triggerJump = () => {
+    const me = runners.current[playerUid];
+    if (!me || me.isJumping || me.stunTimer > 0 || finishDispatched.current) return;
 
-    setDashReady(false);
-    setDashCooldownPct(100);
-    myRunner.dashTimer = 0.45;
-    soundService.playScore();
-
-    // 2.2s cooldown
-    const TOTAL_MS = 2200;
-    const step = 80;
-    let rem = 100;
-    const timer = setInterval(() => {
-      rem -= (step / TOTAL_MS) * 100;
-      if (rem <= 0) {
-        clearInterval(timer);
-        setDashReady(true);
-        setDashCooldownPct(0);
-      } else {
-        setDashCooldownPct(Math.round(rem));
-      }
-    }, step);
+    me.isJumping = true;
+    me.jumpTimer = 0.52;
+    setIsJumpingState(true);
+    soundService.playCountdown(1);
+    if (navigator.vibrate) navigator.vibrate(25);
   };
 
-  // 60 FPS Game Loop
+  // Main 60 FPS Game Loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -126,42 +133,48 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
     const canvasMgr = new CanvasManager(canvas);
     const juice = new JuiceEngine(350);
 
-    const W = 520;
+    const W = 480;
     const H = 640;
-    const TRACK_LEFT = 50;
-    const TRACK_RIGHT = 470;
+    const TRACK_LEFT = 40;
+    const TRACK_RIGHT = 440;
     const TRACK_WIDTH = TRACK_RIGHT - TRACK_LEFT;
 
     // Course Hazards Configuration
     const rotatingHammers = [
-      { y: 520, x: 260, radius: 105, angle: 0, speed: 2.4 },
-      { y: 1180, x: 260, radius: 115, angle: Math.PI / 4, speed: -2.8 },
-      { y: 1720, x: 260, radius: 110, angle: Math.PI / 2, speed: 2.6 }
+      { y: 460, x: 240, radius: 95, angle: 0, speed: 2.6 },
+      { y: 1040, x: 240, radius: 105, angle: Math.PI / 4, speed: -2.8 },
+      { y: 1580, x: 240, radius: 100, angle: Math.PI / 2, speed: 2.7 }
     ];
 
     const slidingBumpers = [
-      { y: 820, w: 150, h: 28, x: 120, minX: 60, maxX: 310, dir: 1, speed: 170 },
-      { y: 1460, w: 150, h: 28, x: 280, minX: 60, maxX: 310, dir: -1, speed: 190 }
+      { y: 740, w: 140, h: 26, x: 100, minX: 50, maxX: 290, dir: 1, speed: 175 },
+      { y: 1320, w: 140, h: 26, x: 250, minX: 50, maxX: 290, dir: -1, speed: 185 }
     ];
 
     const turboPads = [
-      { x: 160, y: 340, w: 70, h: 48 },
-      { x: 360, y: 980, w: 70, h: 48 },
-      { x: 225, y: 1580, w: 70, h: 48 }
+      { x: 140, y: 280, w: 70, h: 44 },
+      { x: 330, y: 880, w: 70, h: 44 },
+      { x: 205, y: 1420, w: 70, h: 44 }
     ];
 
     const mudZones = [
-      { x: 100, y: 680, w: 320, h: 90 },
-      { x: 100, y: 1320, w: 320, h: 90 }
+      { x: 80, y: 580, w: 320, h: 90 },
+      { x: 80, y: 1180, w: 320, h: 90 }
     ];
 
-    // Touch joystick listeners
+    // Dynamic Touch Joystick on Left Screen Half
     const handlePointerDown = (e: PointerEvent) => {
       e.preventDefault();
       try { canvas.setPointerCapture(e.pointerId); } catch {}
       const rect = canvas.getBoundingClientRect();
       const px = ((e.clientX - rect.left) / rect.width) * W;
       const py = ((e.clientY - rect.top) / rect.height) * H;
+
+      // Tap on right half triggers jump
+      if (px > W * 0.65) {
+        triggerJump();
+        return;
+      }
 
       touchJoystick.current = {
         active: true,
@@ -191,6 +204,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
 
     const update = (dt: number) => {
       juice.update(dt);
+      const now = Date.now();
 
       // 1. Update Dynamic Course Hazards
       rotatingHammers.forEach((h) => {
@@ -211,12 +225,29 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       // 2. Update Human Runner Movement
       const me = runners.current[playerUid];
       if (me) {
+        // Handle Jump Arc
+        if (me.isJumping) {
+          me.jumpTimer -= dt;
+          if (me.jumpTimer <= 0) {
+            me.isJumping = false;
+            me.jumpTimer = 0;
+            me.z = 0;
+            setIsJumpingState(false);
+            // Landing dust
+            juice.emitSparks(me.x, me.y, 6, '#cbd5e1', '#94a3b8', 2);
+          } else {
+            // Parabolic jump arc: peak height 36px
+            const progress = (0.52 - me.jumpTimer) / 0.52;
+            me.z = Math.sin(progress * Math.PI) * 36;
+          }
+        }
+
         if (me.stunTimer > 0) {
           me.stunTimer -= dt;
           me.vx *= 0.88;
           me.vy *= 0.88;
         } else {
-          // Check Joystick Vector
+          // Joystick vector
           let moveX = 0;
           let moveY = 0;
 
@@ -224,15 +255,15 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
             const jx = touchJoystick.current.currX - touchJoystick.current.startX;
             const jy = touchJoystick.current.currY - touchJoystick.current.startY;
             const dist = Math.hypot(jx, jy);
-            if (dist > 8) {
-              const maxDist = 55;
+            if (dist > 6) {
+              const maxDist = 50;
               const factor = Math.min(1, dist / maxDist);
               moveX = (jx / dist) * factor;
               moveY = (jy / dist) * factor;
             }
           }
 
-          // Keyboard / Buttons
+          // Keyboard / Button inputs
           const isLeft = keysDown.current['arrowleft'] || keysDown.current['a'] || mobileInput.current.left;
           const isRight = keysDown.current['arrowright'] || keysDown.current['d'] || mobileInput.current.right;
           const isUp = keysDown.current['arrowup'] || keysDown.current['w'] || mobileInput.current.up;
@@ -243,153 +274,198 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
           if (isUp) moveY = 1;
           if (isDown) moveY = -0.5;
 
-          // Default forward run speed (auto-advances along course)
-          let forwardSpeed = 190;
+          // Default auto-running pace along course
+          let forwardSpeed = 205;
 
           if (me.boostTimer > 0) {
             me.boostTimer -= dt;
-            forwardSpeed = 330;
-          }
-          if (me.dashTimer > 0) {
-            me.dashTimer -= dt;
-            forwardSpeed = 360;
+            forwardSpeed = 350; // Super turbo boost!
           }
 
-          // Check Mud Zone slowdown
-          for (const m of mudZones) {
-            if (me.x >= m.x && me.x <= m.x + m.w && me.y >= m.y && me.y <= m.y + m.h) {
-              forwardSpeed *= 0.55;
-              break;
+          // Check Mud Zone: only slows down if on the ground (jumping avoids mud!)
+          if (!me.isJumping) {
+            for (const m of mudZones) {
+              if (me.x >= m.x && me.x <= m.x + m.w && me.y >= m.y && me.y <= m.y + m.h) {
+                forwardSpeed *= 0.45;
+                break;
+              }
             }
           }
 
-          // Apply velocity
-          const lateralSpeed = 230;
+          const lateralSpeed = 240;
           me.vx = moveX * lateralSpeed;
-          me.vy = forwardSpeed + (moveY > 0 ? moveY * 60 : moveY * 80);
+          me.vy = forwardSpeed + (moveY > 0 ? moveY * 55 : moveY * 70);
 
-          if (moveX !== 0 || moveY !== 0 || forwardSpeed > 0) {
-            me.animPhase += dt * 12;
+          if (forwardSpeed > 0) {
+            me.animPhase += dt * 14;
           }
         }
 
-        me.x = Math.max(TRACK_LEFT + 18, Math.min(TRACK_RIGHT - 18, me.x + me.vx * dt));
+        me.x = Math.max(TRACK_LEFT + 16, Math.min(TRACK_RIGHT - 16, me.x + me.vx * dt));
         me.y += me.vy * dt;
 
-        // Check Turbo Pads
-        for (const tp of turboPads) {
-          if (
-            me.x >= tp.x - 12 &&
-            me.x <= tp.x + tp.w + 12 &&
-            me.y >= tp.y - 12 &&
-            me.y <= tp.y + tp.h + 12
-          ) {
-            if (me.boostTimer <= 0) {
-              me.boostTimer = 0.9;
-              soundService.playScore();
-              juice.emitSparks(me.x, me.y, 16, '#10b981', '#34d399', 5);
+        // Check Turbo Pads (only if grounded or low)
+        if (me.z < 12) {
+          for (const tp of turboPads) {
+            if (
+              me.x >= tp.x - 10 &&
+              me.x <= tp.x + tp.w + 10 &&
+              me.y >= tp.y - 10 &&
+              me.y <= tp.y + tp.h + 10
+            ) {
+              if (me.boostTimer <= 0) {
+                me.boostTimer = 0.95;
+                soundService.playScore();
+                juice.addTrauma(0.15);
+                juice.emitSparks(me.x, me.y, 16, '#10b981', '#34d399', 5);
+              }
             }
           }
         }
 
-        // Check Rotating Hammer Hits
-        for (const rh of rotatingHammers) {
-          // Check collision with the 4 rotating arms
-          for (let a = 0; a < 4; a++) {
-            const armAngle = rh.angle + (a * Math.PI) / 2;
-            const hx = rh.x + Math.cos(armAngle) * rh.radius * 0.75;
-            const hy = rh.y + Math.sin(armAngle) * rh.radius * 0.75;
-            const dist = Math.hypot(me.x - hx, me.y - hy);
+        // Check Rotating Spiked Hammers (jump high enough can dodge)
+        if (me.z < 24) {
+          for (const rh of rotatingHammers) {
+            for (let a = 0; a < 4; a++) {
+              const armAngle = rh.angle + (a * Math.PI) / 2;
+              const hx = rh.x + Math.cos(armAngle) * rh.radius * 0.72;
+              const hy = rh.y + Math.sin(armAngle) * rh.radius * 0.72;
+              const dist = Math.hypot(me.x - hx, me.y - hy);
 
-            if (dist < 26 && me.stunTimer <= 0) {
-              me.stunTimer = 0.55;
-              me.vx = Math.cos(armAngle) * 260;
-              me.vy = -180; // Knocked backward!
-              soundService.playImpact(1.3);
-              juice.addTrauma(0.5);
-              juice.emitExplosion(me.x, me.y, 25);
-              break;
+              if (dist < 25 && me.stunTimer <= 0) {
+                me.stunTimer = 0.55;
+                me.vx = Math.cos(armAngle) * 260;
+                me.vy = -180; // Knocks runner backwards!
+                soundService.playImpact(1.3);
+                juice.addTrauma(0.45);
+                juice.emitExplosion(me.x, me.y, 22);
+                break;
+              }
             }
           }
         }
 
-        // Check Sliding Bumper Hits
-        for (const sb of slidingBumpers) {
-          if (
-            me.x >= sb.x - 15 &&
-            me.x <= sb.x + sb.w + 15 &&
-            me.y >= sb.y - 15 &&
-            me.y <= sb.y + sb.h + 15 &&
-            me.stunTimer <= 0
-          ) {
-            me.stunTimer = 0.45;
-            me.vx = sb.dir * 220;
-            me.vy = -160;
-            soundService.playImpact(1.2);
-            juice.addTrauma(0.4);
-            juice.emitSparks(me.x, me.y, 14, '#f43f5e', '#fb7185', 4);
+        // Check Sliding Bumpers (jumping clears bumper!)
+        if (me.z < 18) {
+          for (const sb of slidingBumpers) {
+            if (
+              me.x >= sb.x - 12 &&
+              me.x <= sb.x + sb.w + 12 &&
+              me.y >= sb.y - 12 &&
+              me.y <= sb.y + sb.h + 12 &&
+              me.stunTimer <= 0
+            ) {
+              me.stunTimer = 0.45;
+              me.vx = sb.dir * 240;
+              me.vy = -150;
+              soundService.playImpact(1.2);
+              juice.addTrauma(0.35);
+              juice.emitSparks(me.x, me.y, 14, '#f43f5e', '#fb7185', 4);
+            }
           }
+        }
+
+        // Broadcast runner position (20 Hz)
+        if (now - lastNetworkDispatch.current > 48) {
+          lastNetworkDispatch.current = now;
+          onDispatchAction('RUNNER_POS', {
+            x: Math.round(me.x),
+            y: Math.round(me.y),
+            z: Math.round(me.z),
+            isJumping: me.isJumping,
+            animPhase: Math.round(me.animPhase * 10) / 10
+          });
         }
       }
 
-      // 3. Update CyberBot AI Runner
+      // 3. CyberBot AI Runner (Play Store Standard)
       const bot = runners.current[p2Uid];
       if (bot && isBotPlaying) {
+        if (bot.isJumping) {
+          bot.jumpTimer -= dt;
+          if (bot.jumpTimer <= 0) {
+            bot.isJumping = false;
+            bot.jumpTimer = 0;
+            bot.z = 0;
+          } else {
+            const progress = (0.52 - bot.jumpTimer) / 0.52;
+            bot.z = Math.sin(progress * Math.PI) * 36;
+          }
+        }
+
         if (bot.stunTimer > 0) {
           bot.stunTimer -= dt;
           bot.vx *= 0.88;
           bot.vy *= 0.88;
         } else {
-          let botForwardSpeed = 195; // Competitive human-comparable pace
+          let botSpeed = 208; // Competitive human-matched speed
 
           if (bot.boostTimer > 0) {
             bot.boostTimer -= dt;
-            botForwardSpeed = 330;
+            botSpeed = 350;
           }
 
-          // Bot Pathfinding: target nearby turbo pads
-          let targetX = 260;
-          const nextPad = turboPads.find((tp) => tp.y > bot.y && tp.y < bot.y + 220);
-          if (nextPad) {
-            targetX = nextPad.x + nextPad.w / 2;
+          // Bot Target: aim for upcoming turbo pads
+          let targetX = 240;
+          const nextPad = turboPads.find((tp) => tp.y > bot.y && tp.y < bot.y + 240);
+          if (nextPad) targetX = nextPad.x + nextPad.w / 2;
+
+          // Bot Jump over mud
+          const upcomingMud = mudZones.find((m) => bot.y >= m.y - 30 && bot.y <= m.y + 20);
+          if (upcomingMud && !bot.isJumping && Math.random() < 0.8) {
+            bot.isJumping = true;
+            bot.jumpTimer = 0.52;
           }
 
-          // Avoid imminent rotating hammers
-          const nearHammer = rotatingHammers.find((rh) => Math.abs(rh.y - bot.y) < 110);
+          // Bot Avoid rotating hammers
+          const nearHammer = rotatingHammers.find((rh) => Math.abs(rh.y - bot.y) < 100);
           if (nearHammer) {
-            // Dodge to the outer track edge
-            targetX = bot.x > 260 ? TRACK_RIGHT - 35 : TRACK_LEFT + 35;
+            targetX = bot.x > 240 ? TRACK_RIGHT - 35 : TRACK_LEFT + 35;
           }
 
-          bot.x += (targetX - bot.x) * 0.08;
-          bot.x = Math.max(TRACK_LEFT + 18, Math.min(TRACK_RIGHT - 18, bot.x));
-          bot.y += botForwardSpeed * dt;
-          bot.animPhase += dt * 12;
+          bot.x += (targetX - bot.x) * 0.1;
+          bot.x = Math.max(TRACK_LEFT + 16, Math.min(TRACK_RIGHT - 16, bot.x));
+          bot.y += botSpeed * dt;
+          bot.animPhase += dt * 14;
 
           // Check Turbo Pads for Bot
           for (const tp of turboPads) {
             if (
-              bot.x >= tp.x - 12 &&
-              bot.x <= tp.x + tp.w + 12 &&
-              bot.y >= tp.y - 12 &&
-              bot.y <= tp.y + tp.h + 12
+              bot.x >= tp.x - 10 &&
+              bot.x <= tp.x + tp.w + 10 &&
+              bot.y >= tp.y - 10 &&
+              bot.y <= tp.y + tp.h + 10
             ) {
-              bot.boostTimer = 0.9;
+              bot.boostTimer = 0.95;
             }
           }
         }
+      } else if (!isBotPlaying) {
+        // Interpolate remote opponent in 2P network match
+        const oppUid = p1Uid === playerUid ? p2Uid : p1Uid;
+        const remote = remoteRunners.current[oppUid];
+        if (remote && runners.current[oppUid]) {
+          const r = runners.current[oppUid];
+          r.x += (remote.x - r.x) * 0.35;
+          r.y += (remote.y - r.y) * 0.35;
+          r.z = remote.z;
+          r.isJumping = remote.isJumping;
+          r.animPhase = remote.animPhase;
+        }
       }
 
-      // 4. Finish Line Cross Check (at Y = 2000)
-      const FINISH_Y = 2000;
+      // 4. Finish Line Cross Check
       for (const [uid, runner] of Object.entries(runners.current)) {
         if (runner.y >= FINISH_Y && !finishDispatched.current) {
           finishDispatched.current = true;
           const victor = uid === p1Uid ? p1Nickname : p2Nickname;
-          winnerNameRef.current = victor;
-          setWinnerName(victor);
+          raceWinnerRef.current = victor;
+          setRaceWinner(victor);
           soundService.playVictory();
-          onDispatchAction('RUNNER_FINISH', { winnerUid: uid, actingUid: uid });
+          juice.addTrauma(0.6);
+          juice.emitExplosion(W / 2, FINISH_Y, 50);
+
+          onDispatchAction('RUNNER_FINISH', { winnerUid: uid, actingUid: playerUid });
           break;
         }
       }
@@ -405,26 +481,26 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       const scaleY = canvasMgr.height / H;
       ctx.scale(scaleX, scaleY);
 
-      // Camera smoothly tracks player Y position
-      const me = runners.current[playerUid] || { x: 260, y: 120 };
-      const camY = Math.max(0, Math.min(COURSE_LEN - H + 80, me.y - H * 0.65));
+      // Camera smoothly tracks player Y position forward
+      const me = runners.current[playerUid] || { x: 240, y: 120 };
+      const camY = Math.max(0, Math.min(COURSE_LEN - H + 60, me.y - H * 0.65));
 
       ctx.save();
       ctx.translate(0, -camY);
 
-      // 1. Deep Cyber Platform Background
+      // 1. Deep Cyber Platform Arena
       ctx.fillStyle = '#050914';
       ctx.fillRect(0, 0, W, COURSE_LEN + 300);
 
-      // Track Asphalt Platform
+      // Asphalt Track Platform
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(TRACK_LEFT, 0, TRACK_WIDTH, COURSE_LEN + 200);
 
-      // Track Side Neon Guardrails
+      // Neon Track Guardrails with Glow
       ctx.strokeStyle = '#06b6d4';
-      ctx.lineWidth = 5;
+      ctx.lineWidth = 4;
       ctx.shadowColor = '#06b6d4';
-      ctx.shadowBlur = 12;
+      ctx.shadowBlur = 10;
       ctx.beginPath();
       ctx.moveTo(TRACK_LEFT, 0);
       ctx.lineTo(TRACK_LEFT, COURSE_LEN + 200);
@@ -436,238 +512,246 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       ctx.stroke();
       ctx.shadowBlur = 0;
 
-      // Track Center Dashed Guideline
-      ctx.setLineDash([16, 12]);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-      ctx.lineWidth = 3;
+      // Center Dashed Lane Divider
+      ctx.setLineDash([14, 10]);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(W / 2, 0);
       ctx.lineTo(W / 2, COURSE_LEN + 200);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Start Line (Y = 100)
-      for (let c = 0; c < 12; c++) {
+      // Start Line Chequered Mat (Y = 100)
+      for (let c = 0; c < 10; c++) {
         for (let r = 0; r < 2; r++) {
-          ctx.fillStyle = (c + r) % 2 === 0 ? '#ffffff' : '#000000';
-          ctx.fillRect(TRACK_LEFT + c * (TRACK_WIDTH / 12), 90 + r * 10, TRACK_WIDTH / 12, 10);
+          ctx.fillStyle = (c + r) % 2 === 0 ? '#ffffff' : '#020617';
+          ctx.fillRect(TRACK_LEFT + c * (TRACK_WIDTH / 10), 90 + r * 10, TRACK_WIDTH / 10, 10);
         }
       }
       ctx.fillStyle = '#38bdf8';
-      ctx.font = '900 12px "Outfit", sans-serif';
+      ctx.font = '900 11px "Outfit", sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('⚡ START LINE ⚡', W / 2, 78);
 
-      // Distance Markers every 400px
-      for (let markY = 400; markY <= 1600; markY += 400) {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-        ctx.font = '900 42px "Outfit", sans-serif';
-        ctx.fillText(`${markY}M`, W / 2, markY + 15);
-      }
-
-      // Mud / Sticky Zones
-      mudZones.forEach((mz) => {
-        ctx.fillStyle = 'rgba(168, 85, 247, 0.22)';
-        ctx.fillRect(mz.x, mz.y, mz.w, mz.h);
+      // 2. Render Mud Zones
+      for (const m of mudZones) {
+        ctx.fillStyle = 'rgba(88, 28, 135, 0.75)';
+        ctx.fillRect(m.x, m.y, m.w, m.h);
         ctx.strokeStyle = '#c084fc';
         ctx.lineWidth = 2;
-        ctx.strokeRect(mz.x, mz.y, mz.w, mz.h);
+        ctx.strokeRect(m.x, m.y, m.w, m.h);
 
-        ctx.fillStyle = '#e9d5ff';
-        ctx.font = '900 11px font-mono';
-        ctx.fillText('⚠ SLOW HAZARD ⚠', W / 2, mz.y + mz.h / 2 + 4);
-      });
-
-      // Turbo Boost Pads
-      turboPads.forEach((tp) => {
-        ctx.fillStyle = '#10b981';
-        ctx.shadowColor = '#10b981';
-        ctx.shadowBlur = 14;
-        ctx.beginPath();
-        ctx.roundRect(tp.x, tp.y, tp.w, tp.h, 8);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '900 13px "Outfit", sans-serif';
-        ctx.fillText('▲ BOOST ▲', tp.x + tp.w / 2, tp.y + tp.h / 2 + 5);
-      });
-
-      // Sliding Bumper Pistons
-      slidingBumpers.forEach((sb) => {
-        ctx.fillStyle = '#e11d48';
-        ctx.shadowColor = '#f43f5e';
-        ctx.shadowBlur = 12;
-        ctx.beginPath();
-        ctx.roundRect(sb.x, sb.y, sb.w, sb.h, 6);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-
-        // Bumper warning stripes
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '900 10px monospace';
-        ctx.fillText('⚡ BUMPER ⚡', sb.x + sb.w / 2, sb.y + sb.h / 2 + 3);
-      });
-
-      // Rotating Windmill Hammers
-      rotatingHammers.forEach((rh) => {
-        // Center hub
-        ctx.fillStyle = '#334155';
-        ctx.beginPath();
-        ctx.arc(rh.x, rh.y, 18, 0, Math.PI * 2);
-        ctx.fill();
-
-        // 4 Spinning arms
-        for (let a = 0; a < 4; a++) {
-          const armAngle = rh.angle + (a * Math.PI) / 2;
-          const endX = rh.x + Math.cos(armAngle) * rh.radius;
-          const endY = rh.y + Math.sin(armAngle) * rh.radius;
-
-          ctx.strokeStyle = '#f59e0b';
-          ctx.lineWidth = 10;
+        // Toxic Slime bubbles
+        ctx.fillStyle = '#e879f9';
+        for (let b = 0; b < 6; b++) {
           ctx.beginPath();
-          ctx.moveTo(rh.x, rh.y);
-          ctx.lineTo(endX, endY);
-          ctx.stroke();
-
-          // Spiked hammer head
-          ctx.fillStyle = '#dc2626';
-          ctx.shadowColor = '#f43f5e';
-          ctx.shadowBlur = 12;
-          ctx.beginPath();
-          ctx.arc(endX, endY, 14, 0, Math.PI * 2);
+          ctx.arc(m.x + 35 + b * 50, m.y + 45 + Math.sin(b * 2) * 20, 6, 0, Math.PI * 2);
           ctx.fill();
-          ctx.shadowBlur = 0;
         }
-      });
-
-      // Grand Finish Arch at Y = 2000
-      const FINISH_Y = 2000;
-      for (let c = 0; c < 14; c++) {
-        for (let r = 0; r < 3; r++) {
-          ctx.fillStyle = (c + r) % 2 === 0 ? '#ffffff' : '#000000';
-          ctx.fillRect(TRACK_LEFT + c * (TRACK_WIDTH / 14), FINISH_Y + r * 12, TRACK_WIDTH / 14, 12);
-        }
+        ctx.fillStyle = '#f3e8ff';
+        ctx.font = '900 10px "Outfit", sans-serif';
+        ctx.fillText('⚠️ TOXIC SLIME (JUMP OVER!)', W / 2, m.y + m.h / 2 + 3);
       }
-      ctx.fillStyle = '#fbbf24';
-      ctx.shadowColor = '#f59e0b';
-      ctx.shadowBlur = 18;
-      ctx.font = '900 24px "Outfit", sans-serif';
-      ctx.fillText('🏁 FINISH ARCH 🏁', W / 2, FINISH_Y - 18);
-      ctx.shadowBlur = 0;
 
-      // 2. Render 2.5D Avatars (Play Store Stumble Challenge Style)
-      const drawRunner = (
-        r: { x: number; y: number; animPhase: number; stunTimer: number; boostTimer: number },
-        color: string,
-        glow: string,
-        isPlayer: boolean,
-        name: string
-      ) => {
-        ctx.save();
-        ctx.translate(r.x, r.y);
+      // 3. Render Turbo Arrow Boost Pads
+      for (const tp of turboPads) {
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
+        ctx.fillRect(tp.x, tp.y, tp.w, tp.h);
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(tp.x, tp.y, tp.w, tp.h);
 
-        // Runner Drop Shadow
+        // Glowing Chevron Arrows
+        ctx.fillStyle = '#34d399';
+        ctx.beginPath();
+        ctx.moveTo(tp.x + tp.w / 2, tp.y + 8);
+        ctx.lineTo(tp.x + tp.w - 14, tp.y + tp.h - 10);
+        ctx.lineTo(tp.x + 14, tp.y + tp.h - 10);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // 4. Render Sliding Bumpers
+      for (const sb of slidingBumpers) {
+        // Shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(sb.x, sb.y + 4, sb.w, sb.h);
+
+        // Bumper body with warning stripes
+        ctx.fillStyle = '#e11d48';
+        ctx.fillRect(sb.x, sb.y, sb.w, sb.h);
+
+        // Warning diagonal hazard stripes
+        ctx.fillStyle = '#fbbf24';
+        for (let s = 0; s < sb.w; s += 24) {
+          ctx.beginPath();
+          ctx.moveTo(sb.x + s, sb.y);
+          ctx.lineTo(sb.x + s + 12, sb.y);
+          ctx.lineTo(sb.x + s + 6, sb.y + sb.h);
+          ctx.lineTo(sb.x + s - 6, sb.y + sb.h);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(sb.x, sb.y, sb.w, sb.h);
+      }
+
+      // 5. Render Rotating Spiked Hammers
+      for (const rh of rotatingHammers) {
+        // Center hub shadow
         ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
         ctx.beginPath();
-        ctx.ellipse(0, 10, 16, 7, 0, 0, Math.PI * 2);
+        ctx.arc(rh.x, rh.y + 5, 18, 0, Math.PI * 2);
         ctx.fill();
 
-        // Stunned comic stars
-        if (r.stunTimer > 0) {
-          ctx.fillStyle = '#fbbf24';
-          ctx.font = '14px sans-serif';
-          ctx.fillText('⭐💫', -10, -28);
+        // 4 Rotating Arms with Spikes
+        for (let a = 0; a < 4; a++) {
+          const armAngle = rh.angle + (a * Math.PI) / 2;
+          const hx = rh.x + Math.cos(armAngle) * rh.radius * 0.72;
+          const hy = rh.y + Math.sin(armAngle) * rh.radius * 0.72;
+
+          // Arm bar
+          ctx.strokeStyle = '#475569';
+          ctx.lineWidth = 7;
+          ctx.beginPath();
+          ctx.moveTo(rh.x, rh.y);
+          ctx.lineTo(hx, hy);
+          ctx.stroke();
+
+          // Spiked Hammer head
+          ctx.fillStyle = '#f59e0b';
+          ctx.beginPath();
+          ctx.arc(hx, hy, 14, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // Spike tip
+          const tipX = hx + Math.cos(armAngle) * 10;
+          const tipY = hy + Math.sin(armAngle) * 10;
+          ctx.fillStyle = '#dc2626';
+          ctx.beginPath();
+          ctx.arc(tipX, tipY, 4, 0, Math.PI * 2);
+          ctx.fill();
         }
 
-        // Running Legs Animation (Alternating stride)
-        const legSwing = Math.sin(r.animPhase) * 6;
+        // Center hub
         ctx.fillStyle = '#1e293b';
-        // Left Foot
         ctx.beginPath();
-        ctx.arc(-7, 8 + legSwing, 4.5, 0, Math.PI * 2);
-        ctx.fill();
-        // Right Foot
-        ctx.beginPath();
-        ctx.arc(7, 8 - legSwing, 4.5, 0, Math.PI * 2);
+        ctx.arc(rh.x, rh.y, 16, 0, Math.PI * 2);
         ctx.fill();
 
-        // Runner Body Torso
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
+      // 6. Finish Line Archway (Y = 1880)
+      for (let c = 0; c < 12; c++) {
+        for (let r = 0; r < 3; r++) {
+          ctx.fillStyle = (c + r) % 2 === 0 ? '#ffffff' : '#000000';
+          ctx.fillRect(TRACK_LEFT + c * (TRACK_WIDTH / 12), FINISH_Y + r * 10, TRACK_WIDTH / 12, 10);
+        }
+      }
+
+      // Finish Banner Pillars
+      ctx.fillStyle = '#f59e0b';
+      ctx.fillRect(TRACK_LEFT - 8, FINISH_Y - 20, 12, 60);
+      ctx.fillRect(TRACK_RIGHT - 4, FINISH_Y - 20, 12, 60);
+
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = '900 16px "Outfit", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#f59e0b';
+      ctx.shadowBlur = 16;
+      ctx.fillText('🏁 FINISH LINE 🏁', W / 2, FINISH_Y - 10);
+      ctx.shadowBlur = 0;
+
+      // 7. Render Both 2.5D Stylized Humanoid Runners
+      for (const [uid, runner] of Object.entries(runners.current)) {
+        const isMe = uid === playerUid;
+        const color = isMe ? '#06b6d4' : '#f43f5e';
+        const visorColor = isMe ? '#38bdf8' : '#fb7185';
+        const z = runner.z || 0; // jump height
+
+        ctx.save();
+        ctx.translate(runner.x, runner.y);
+
+        // Ground Drop Shadow (Contracts as runner jumps)
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        ctx.beginPath();
+        ctx.ellipse(
+          0,
+          8,
+          Math.max(6, 16 - z * 0.25),
+          Math.max(3, 8 - z * 0.15),
+          0,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+
+        // Stun Stars if stunned
+        if (runner.stunTimer > 0) {
+          ctx.fillStyle = '#facc15';
+          const animTime = Date.now();
+          for (let s = 0; s < 3; s++) {
+            const starAngle = animTime * 0.01 + (s * Math.PI * 2) / 3;
+            ctx.fillText('⭐', Math.cos(starAngle) * 18, -30 + Math.sin(starAngle) * 8);
+          }
+        }
+
+        // Lift runner by z height
+        ctx.translate(0, -z);
+
+        // Boost Fire Trail when sprinting
+        if (runner.boostTimer > 0) {
+          ctx.fillStyle = 'rgba(16, 185, 129, 0.8)';
+          ctx.beginPath();
+          ctx.arc(0, 18, 12, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Athletic Runner Body
+        // Pumping legs animation
+        const legSwing = Math.sin(runner.animPhase) * 7;
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(-8, 6 + legSwing, 5, 12);
+        ctx.fillRect(3, 6 - legSwing, 5, 12);
+
+        // Torso
         ctx.fillStyle = color;
-        ctx.shadowColor = glow;
-        ctx.shadowBlur = r.boostTimer > 0 ? 18 : 8;
         ctx.beginPath();
-        ctx.arc(0, 0, 13, 0, Math.PI * 2);
+        ctx.roundRect(-10, -10, 20, 18, 5);
         ctx.fill();
-        ctx.shadowBlur = 0;
 
-        // Headband / Visor
+        // Runner Head
+        ctx.fillStyle = '#1e293b';
+        ctx.beginPath();
+        ctx.arc(0, -16, 10, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Glowing Visor
+        ctx.fillStyle = visorColor;
+        ctx.beginPath();
+        ctx.roundRect(-6, -19, 12, 5, 2);
+        ctx.fill();
+
+        // Name / "YOU" Label
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(-10, -4, 20, 5);
-
-        // Name Tag
-        ctx.font = '900 11px "Outfit", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = isPlayer ? '#ffffff' : color;
-        ctx.fillText(isPlayer ? '▼ YOU' : name.substring(0, 8), 0, -20);
+        ctx.font = '900 10px "Outfit", sans-serif';
+        ctx.fillText(isMe ? 'YOU' : uid === p1Uid ? p1Nickname.substring(0, 8) : p2Nickname.substring(0, 8), 0, -28);
 
         ctx.restore();
-      };
-
-      const p1R = runners.current[p1Uid];
-      const p2R = runners.current[p2Uid];
-
-      if (p1R) drawRunner(p1R, '#f59e0b', '#fbbf24', playerUid === p1Uid, p1Nickname);
-      if (p2R) drawRunner(p2R, '#06b6d4', '#22d3ee', playerUid === p2Uid, p2Nickname);
-
-      ctx.restore(); // Restore camera translation
-
-      // 3. Render Virtual Touch Joystick on Screen
-      if (touchJoystick.current.active) {
-        const j = touchJoystick.current;
-        // Base ring
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(j.startX, j.startY, 45, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Thumb stick
-        const jx = j.currX - j.startX;
-        const jy = j.currY - j.startY;
-        const dist = Math.hypot(jx, jy);
-        const stickX = dist > 45 ? j.startX + (jx / dist) * 45 : j.currX;
-        const stickY = dist > 45 ? j.startY + (jy / dist) * 45 : j.currY;
-
-        ctx.fillStyle = '#06b6d4';
-        ctx.shadowColor = '#06b6d4';
-        ctx.shadowBlur = 10;
-        ctx.beginPath();
-        ctx.arc(stickX, stickY, 20, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
       }
 
-      // 4. Winner Celebration Banner
-      const victor = winnerNameRef.current || winnerName;
-      if (victor) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        ctx.fillRect(0, 0, W, H);
-
-        ctx.fillStyle = '#fbbf24';
-        ctx.shadowColor = '#f59e0b';
-        ctx.shadowBlur = 28;
-        ctx.font = '900 46px "Outfit", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(`🏆 ${victor.toUpperCase()}!`, W / 2, H / 2 - 20);
-        ctx.shadowBlur = 0;
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '700 18px "Outfit", sans-serif';
-        ctx.fillText('WINNER CROSSES FINISH LINE!', W / 2, H / 2 + 25);
-      }
-
-      ctx.restore();
+      ctx.restore(); // Exit camera translate
+      ctx.restore(); // Exit scaling
 
       // Particle system overlay
       juice.renderParticles(canvasMgr.ctx, canvasMgr.width / W);
@@ -683,77 +767,84 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       canvas.removeEventListener('pointerup', handlePointerUp);
       canvas.removeEventListener('pointercancel', handlePointerUp);
     };
-  }, [p1Uid, p2Uid, isHost, isBotPlaying, p1Nickname, p2Nickname, onDispatchAction]);
+  }, [p1Uid, p2Uid, isBotPlaying, isHost, p1Nickname, p2Nickname, onDispatchAction]);
 
-  const p1Progress = Math.min(100, Math.round(((runners.current[p1Uid]?.y || 120) / 2000) * 100));
-  const p2Progress = Math.min(100, Math.round(((runners.current[p2Uid]?.y || 120) / 2000) * 100));
+  const p1Score = room.scores[p1Uid] || 0;
+  const p2Score = room.scores[p2Uid] || 0;
+  const myRunner = runners.current[playerUid];
+  const myPct = myRunner ? Math.min(100, Math.round((myRunner.y / FINISH_Y) * 100)) : 0;
+  const oppRunner = runners.current[p1Uid === playerUid ? p2Uid : p1Uid];
+  const oppPct = oppRunner ? Math.min(100, Math.round((oppRunner.y / FINISH_Y) * 100)) : 0;
 
   return (
-    <div className="w-full max-w-lg mx-auto flex flex-col items-center select-none gap-2 px-2">
-      {/* Top Scores Bar */}
-      <div className="w-full flex items-center justify-between px-4 py-2 rounded-2xl bg-slate-900/90 border border-white/10 text-xs font-mono font-bold shadow-md">
-        <span className="text-amber-400">
-          {p1Nickname}: <span className="text-white text-sm font-black">{room.scores[p1Uid] || 0}</span>
-        </span>
-        <span className="text-slate-400 text-[11px] font-black flex items-center gap-1">
-          <Trophy className="w-3.5 h-3.5 text-amber-400" />
-          <span>FIRST TO {room.maxRounds || 3}</span>
-        </span>
-        <span className="text-cyan-400">
-          {p2Nickname}: <span className="text-white text-sm font-black">{room.scores[p2Uid] || 0}</span>
-        </span>
+    <div className="w-full max-w-md mx-auto flex flex-col items-center select-none gap-2 px-1">
+      {/* Live Distance Race Tracker Bar */}
+      <div className="w-full flex flex-col gap-1.5 px-3 py-2 rounded-2xl bg-slate-900/90 border border-white/10 shadow-md">
+        <div className="flex items-center justify-between text-xs font-mono font-bold">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
+            <span className="text-cyan-300 font-['Outfit'] font-black">{p1Nickname} (YOU)</span>
+            <span className="text-cyan-400 font-black">{myPct}%</span>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-rose-400 font-black">{oppPct}%</span>
+            <span className="text-rose-300 font-['Outfit'] font-black">{p2Nickname}</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
+          </div>
+        </div>
+
+        {/* Live Race Distance Progress Bar with Runner Icons */}
+        <div className="w-full h-3 rounded-full bg-slate-950 border border-slate-700 relative overflow-hidden flex items-center">
+          <div
+            className="absolute top-0 bottom-0 left-0 bg-cyan-500/30 rounded-full transition-all duration-75"
+            style={{ width: `${myPct}%` }}
+          />
+          {/* My Runner Dot */}
+          <div
+            className="absolute w-3.5 h-3.5 rounded-full bg-cyan-400 border border-white shadow-[0_0_8px_#38bdf8] transition-all duration-75 -ml-1.5"
+            style={{ left: `${myPct}%` }}
+          />
+          {/* Opponent Runner Dot */}
+          <div
+            className="absolute w-3.5 h-3.5 rounded-full bg-rose-500 border border-white shadow-[0_0_8px_#f43f5e] transition-all duration-75 -ml-1.5"
+            style={{ left: `${oppPct}%` }}
+          />
+          <Flag className="w-3 h-3 text-amber-400 absolute right-1 pointer-events-none" />
+        </div>
       </div>
 
-      {/* Real-time Sprint Progress Tracker */}
-      <div className="w-full p-2.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-md">
-        <div className="flex items-center justify-between text-xs font-mono font-bold mb-1">
-          <span className="text-amber-400 font-black">{p1Nickname}: {p1Progress}%</span>
-          <span className="text-slate-400">🏃 GAUNTLET RUN</span>
-          <span className="text-cyan-400 font-black">{p2Nickname}: {p2Progress}%</span>
-        </div>
-        <div className="relative w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
-          <div
-            className="absolute left-0 top-0 h-full bg-gradient-to-r from-amber-600 to-amber-300 transition-all duration-75"
-            style={{ width: `${p1Progress}%` }}
-          />
-        </div>
-        <div className="relative w-full h-2.5 bg-slate-800 rounded-full overflow-hidden mt-1">
-          <div
-            className="absolute left-0 top-0 h-full bg-gradient-to-r from-cyan-600 to-cyan-300 transition-all duration-75"
-            style={{ width: `${p2Progress}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Main 2.5D Obstacle Arena Canvas */}
-      <div className="w-full aspect-[3/4] h-[52vh] min-h-[400px] max-h-[580px] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 relative bg-slate-950 cursor-pointer">
+      {/* Canvas Gauntlet Stage - Fits mobile viewport comfortably */}
+      <div className="w-full h-[52vh] min-h-[340px] max-h-[500px] aspect-[480/640] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 relative bg-[#050914] cursor-pointer">
         <canvas
           ref={canvasRef}
           style={{ touchAction: 'none' }}
           className="w-full h-full block select-none"
         />
+
+        {/* Victory Celebration Banner */}
+        {raceWinner && (
+          <div className="absolute inset-0 bg-black/75 backdrop-blur-sm flex flex-col items-center justify-center animate-fade-in p-4 text-center">
+            <Trophy className="w-14 h-14 text-amber-400 mb-2 animate-bounce" />
+            <h2 className="text-3xl font-black font-['Outfit'] text-amber-300">
+              {raceWinner.toUpperCase()} WINS!
+            </h2>
+            <p className="text-xs font-mono text-slate-300 mt-1">Crossed the Finish Arch First!</p>
+          </div>
+        )}
       </div>
 
-      {/* Mobile Ergonomic Controls: Analog D-Pad & Dash */}
-      <div className="w-full grid grid-cols-4 gap-2 max-w-sm pt-1">
+      {/* Mobile Controls: Steering + Prominent JUMP Button */}
+      <div className="w-full grid grid-cols-3 gap-2 max-w-sm pt-0.5">
         <button
           onPointerDown={(e) => { e.preventDefault(); mobileInput.current.left = true; }}
           onPointerUp={() => { mobileInput.current.left = false; }}
           onPointerLeave={() => { mobileInput.current.left = false; }}
           onPointerCancel={() => { mobileInput.current.left = false; }}
-          className="h-13 rounded-2xl bg-slate-900 border-2 border-slate-700 active:bg-cyan-600/30 active:scale-95 text-slate-200 flex items-center justify-center shadow-lg touch-manipulation cursor-pointer"
+          className="h-12 rounded-xl bg-slate-900 border-2 border-cyan-500/40 active:bg-cyan-600/30 active:scale-95 text-xs font-black font-mono text-cyan-300 flex items-center justify-center gap-1 shadow-md touch-manipulation cursor-pointer"
         >
-          <ChevronLeft className="w-6 h-6 text-cyan-400" />
-        </button>
-
-        <button
-          onPointerDown={(e) => { e.preventDefault(); mobileInput.current.up = true; }}
-          onPointerUp={() => { mobileInput.current.up = false; }}
-          onPointerLeave={() => { mobileInput.current.up = false; }}
-          onPointerCancel={() => { mobileInput.current.up = false; }}
-          className="h-13 rounded-2xl bg-slate-900 border-2 border-slate-700 active:bg-cyan-600/30 active:scale-95 text-slate-200 flex items-center justify-center shadow-lg touch-manipulation cursor-pointer"
-        >
-          <ArrowUp className="w-6 h-6 text-cyan-400" />
+          <ChevronLeft className="w-4 h-4 text-cyan-400" />
+          <span>LEFT</span>
         </button>
 
         <button
@@ -761,28 +852,28 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
           onPointerUp={() => { mobileInput.current.right = false; }}
           onPointerLeave={() => { mobileInput.current.right = false; }}
           onPointerCancel={() => { mobileInput.current.right = false; }}
-          className="h-13 rounded-2xl bg-slate-900 border-2 border-slate-700 active:bg-cyan-600/30 active:scale-95 text-slate-200 flex items-center justify-center shadow-lg touch-manipulation cursor-pointer"
+          className="h-12 rounded-xl bg-slate-900 border-2 border-cyan-500/40 active:bg-cyan-600/30 active:scale-95 text-xs font-black font-mono text-cyan-300 flex items-center justify-center gap-1 shadow-md touch-manipulation cursor-pointer"
         >
-          <ChevronRight className="w-6 h-6 text-cyan-400" />
+          <span>RIGHT</span>
+          <ChevronRight className="w-4 h-4 text-cyan-400" />
         </button>
 
-        {/* DASH BUTTON */}
+        {/* Large Prominent JUMP Button (Clears slime mud & low hazards!) */}
         <button
-          onPointerDown={(e) => { e.preventDefault(); handleTriggerDash(); }}
-          disabled={!dashReady}
-          className={`h-13 rounded-2xl border-2 flex items-center justify-center gap-1 font-mono font-black text-xs shadow-xl active:scale-95 transition touch-manipulation cursor-pointer ${
-            dashReady
-              ? 'bg-gradient-to-r from-amber-500 to-orange-500 border-amber-300 text-slate-950 shadow-amber-500/30'
-              : 'bg-slate-800 border-slate-700 text-slate-500'
+          onClick={triggerJump}
+          className={`h-12 rounded-xl border-2 font-mono font-black text-xs flex items-center justify-center gap-1 shadow-lg active:scale-95 transition touch-manipulation cursor-pointer ${
+            isJumpingState
+              ? 'bg-amber-500/30 border-amber-400 text-amber-300'
+              : 'bg-gradient-to-r from-amber-600 to-yellow-500 border-amber-400 text-slate-950 font-black'
           }`}
         >
-          <Zap className="w-4 h-4 fill-current" />
-          <span>{dashReady ? 'DASH' : `${dashCooldownPct}%`}</span>
+          <ArrowUp className="w-4 h-4 stroke-[3]" />
+          <span>JUMP</span>
         </button>
       </div>
 
-      <p className="text-[11px] text-slate-400 font-mono text-center">
-        👆 Drag finger anywhere on screen to steer in 360° • Tap DASH or Spacebar to burst forward!
+      <p className="text-[10px] text-slate-400 font-mono text-center">
+        🕹️ Drag left half to steer • Tap JUMP to clear toxic mud & hazards!
       </p>
     </div>
   );
