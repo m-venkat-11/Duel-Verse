@@ -27,20 +27,24 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
   const [scorerBanner, setScorerBanner] = useState<{ name: string; isP1: boolean } | null>(null);
   const scorerBannerRef = useRef<{ name: string; isP1: boolean } | null>(null);
 
-  // Paddles in court percentage (0 to 100)
-  // Local Player is always at the bottom
-  const myPaddle = useRef({ x: 50, y: 88, vx: 0, targetX: 50 });
-  const oppPaddle = useRef({ x: 50, y: 12, vx: 0, targetX: 50 });
+  // Paddles in court pixels: W = 460, H = 640
+  const W = 460;
+  const H = 640;
+  const PADDLE_W = 100;
+  const PADDLE_H = 18;
+  const BALL_R = 10;
 
-  // Ball physics state
+  const myPaddleX = useRef<number>(W / 2);
+  const oppPaddleX = useRef<number>(W / 2);
+  const myPaddlePrevX = useRef<number>(W / 2);
+
+  // Ball physics
   const ball = useRef({
-    x: 50,
-    y: 50,
-    vx: (Math.random() > 0.5 ? 1 : -1) * 0.42,
-    vy: 0.48,
-    speed: 1.0,
-    spin: 0,
-    arcHeight: 0
+    x: W / 2,
+    y: H / 2,
+    vx: (Math.random() > 0.5 ? 1 : -1) * 3.2,
+    vy: 4.8,
+    speed: 1.0
   });
 
   const goalCooldown = useRef(0);
@@ -48,7 +52,7 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
   const keysDown = useRef<{ [key: string]: boolean }>({});
   const mobileButtons = useRef({ left: false, right: false });
 
-  // Keyboard navigation (WASD / Arrows)
+  // Keyboard navigation
   useEffect(() => {
     const handleDown = (e: KeyboardEvent) => {
       keysDown.current[e.key.toLowerCase()] = true;
@@ -73,9 +77,9 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
       const oppUid = bottomUid === playerUid ? topUid : bottomUid;
       const remote = room.gameState.paddles[oppUid];
       if (typeof remote === 'number') {
-        oppPaddle.current.targetX = remote;
+        oppPaddleX.current = (remote / 100) * W;
       } else if (remote && typeof remote.x === 'number') {
-        oppPaddle.current.targetX = remote.x;
+        oppPaddleX.current = (remote.x / 100) * W;
       }
     }
   }, [room.gameState?.paddles, isBotPlaying, bottomUid, topUid, playerUid]);
@@ -86,43 +90,44 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
     if (!canvas) return;
 
     const canvasMgr = new CanvasManager(canvas);
-    const juice = new JuiceEngine(350);
+    const juice = new JuiceEngine(300);
 
-    const W = 480;
-    const H = 680;
-    const PADDLE_W = 24; // % court width
-    const PADDLE_H = 3.8; // % court height
-    const PADDLE_HALF_W = PADDLE_W / 2;
-    const PADDLE_HALF_H = PADDLE_H / 2;
+    const PADDLE_BOTTOM_Y = H - 65;
+    const PADDLE_TOP_Y = 65;
 
     const serve = (toBottom: boolean) => {
-      ball.current.x = 50;
-      ball.current.y = 50;
-      ball.current.vx = (Math.random() > 0.5 ? 1 : -1) * (0.34 + Math.random() * 0.16);
-      ball.current.vy = toBottom ? 0.46 : -0.46;
+      ball.current.x = W / 2;
+      ball.current.y = H / 2;
+      ball.current.vx = (Math.random() > 0.5 ? 1 : -1) * (2.8 + Math.random() * 1.5);
+      ball.current.vy = toBottom ? 4.8 : -4.8;
       ball.current.speed = 1.0;
-      ball.current.spin = 0;
-      ball.current.arcHeight = 0;
       soundService.playCountdown(0);
     };
 
-    // Pre-allocated particle trail
-    const TRAIL_MAX = 12;
-    const trail: Array<{ x: number; y: number; alpha: number }> = [];
-    for (let i = 0; i < TRAIL_MAX; i++) trail.push({ x: 50, y: 50, alpha: 0 });
+    // Instant 1-to-1 finger drag tracking
+    const updatePointer = (clientX: number, clientY: number) => {
+      const rect = canvas.getBoundingClientRect();
+      const px = ((clientX - rect.left) / rect.width) * W;
+      const py = ((clientY - rect.top) / rect.height) * H;
 
-    // Direct 1-to-1 Touch drag tracking
+      // Local 2-Player support on same device:
+      // If user touches top half (py < H / 2) in local practice, control top paddle!
+      if (!isBotPlaying && !room.gameState?.paddles && py < H * 0.45) {
+        oppPaddleX.current = Math.max(PADDLE_W / 2, Math.min(W - PADDLE_W / 2, px));
+      } else {
+        myPaddleX.current = Math.max(PADDLE_W / 2, Math.min(W - PADDLE_W / 2, px));
+      }
+    };
+
     const handlePointerMove = (e: PointerEvent) => {
       e.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      const px = ((e.clientX - rect.left) / rect.width) * 100;
-      myPaddle.current.targetX = Math.max(PADDLE_HALF_W, Math.min(100 - PADDLE_HALF_W, px));
+      updatePointer(e.clientX, e.clientY);
     };
 
     const handlePointerDown = (e: PointerEvent) => {
       e.preventDefault();
       try { canvas.setPointerCapture(e.pointerId); } catch {}
-      handlePointerMove(e);
+      updatePointer(e.clientX, e.clientY);
     };
 
     canvas.addEventListener('pointerdown', handlePointerDown);
@@ -131,32 +136,27 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
     const update = (dt: number) => {
       juice.update(dt);
       const now = Date.now();
-      const prevMyX = myPaddle.current.x;
 
-      // 1. Controls (Buttons / Keyboard)
+      // Keyboard & Mobile Button movement
       const isLeft = keysDown.current['arrowleft'] || keysDown.current['a'] || mobileButtons.current.left;
       const isRight = keysDown.current['arrowright'] || keysDown.current['d'] || mobileButtons.current.right;
+      const keySpeed = 380 * dt;
 
-      if (isLeft) {
-        myPaddle.current.targetX = Math.max(PADDLE_HALF_W, myPaddle.current.targetX - 70 * dt);
-      }
-      if (isRight) {
-        myPaddle.current.targetX = Math.min(100 - PADDLE_HALF_W, myPaddle.current.targetX + 70 * dt);
-      }
+      if (isLeft) myPaddleX.current = Math.max(PADDLE_W / 2, myPaddleX.current - keySpeed);
+      if (isRight) myPaddleX.current = Math.min(W - PADDLE_W / 2, myPaddleX.current + keySpeed);
 
-      // Smooth interpolation for local paddle
-      myPaddle.current.x += (myPaddle.current.targetX - myPaddle.current.x) * 0.45;
-      myPaddle.current.vx = myPaddle.current.x - prevMyX;
+      const paddleVx = myPaddleX.current - myPaddlePrevX.current;
+      myPaddlePrevX.current = myPaddleX.current;
 
       // Throttled network broadcast (20 Hz)
       if (now - lastNetworkDispatch.current > 48) {
         lastNetworkDispatch.current = now;
         onDispatchAction('PONG_PADDLE', {
-          xPos: Math.round(myPaddle.current.x)
+          xPos: Math.round((myPaddleX.current / W) * 100)
         });
       }
 
-      // 2. Goal Cooldown Pause
+      // Goal Cooldown Pause
       if (goalCooldown.current > 0) {
         goalCooldown.current -= dt;
         if (goalCooldown.current <= 0) {
@@ -166,138 +166,110 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
         return;
       }
 
-      // 3. CyberBot AI (Sleek Play Store Standard: humanly competitive and beatable)
+      // CyberBot AI: Competitive, natural, humanly beatable
       if (isBotPlaying) {
         const b = ball.current;
-        const prevOppX = oppPaddle.current.x;
-
         if (b.vy < 0) {
-          // Ball moving towards bot: anticipate with slight human reaction lag
-          const reactionOffset = Math.sin(now * 0.004) * 4;
-          const target = b.x + reactionOffset;
-          oppPaddle.current.targetX += (target - oppPaddle.current.targetX) * 0.14;
+          // Ball moving towards bot: smoothly track ball with human-like lag
+          const botSpeed = 340 * dt;
+          const targetX = b.x;
+          if (oppPaddleX.current < targetX - 6) {
+            oppPaddleX.current = Math.min(W - PADDLE_W / 2, oppPaddleX.current + botSpeed);
+          } else if (oppPaddleX.current > targetX + 6) {
+            oppPaddleX.current = Math.max(PADDLE_W / 2, oppPaddleX.current - botSpeed);
+          }
         } else {
-          // Ball moving away: return towards center table defense position
-          oppPaddle.current.targetX += (50 - oppPaddle.current.targetX) * 0.06;
-        }
-
-        oppPaddle.current.targetX = Math.max(PADDLE_HALF_W, Math.min(100 - PADDLE_HALF_W, oppPaddle.current.targetX));
-        oppPaddle.current.x += (oppPaddle.current.targetX - oppPaddle.current.x) * 0.35;
-        oppPaddle.current.vx = oppPaddle.current.x - prevOppX;
-      } else {
-        // Network opponent smooth interpolation
-        oppPaddle.current.x += (oppPaddle.current.targetX - oppPaddle.current.x) * 0.35;
-      }
-
-      // 4. Ball Physics with Spin and Table Arc
-      const spd = ball.current.speed;
-      ball.current.x += (ball.current.vx + ball.current.spin * 0.12) * spd * dt * 60;
-      ball.current.y += ball.current.vy * spd * dt * 60;
-      ball.current.spin *= 0.985;
-
-      // Realistic 3D table bounce arc (ball simulates height off table)
-      const distFromNet = Math.abs(ball.current.y - 50) / 50; // 0 at net, 1 at paddle
-      ball.current.arcHeight = Math.sin(distFromNet * Math.PI) * 12;
-
-      // Side Table Bounce Rails
-      if (ball.current.x <= 3.8) {
-        ball.current.x = 3.8;
-        ball.current.vx = Math.abs(ball.current.vx);
-        juice.playSound('ricochet');
-        juice.addTrauma(0.12);
-        juice.emitSparks((ball.current.x / 100) * W, (ball.current.y / 100) * H, 8, '#38bdf8', '#0ea5e9', 3);
-      } else if (ball.current.x >= 96.2) {
-        ball.current.x = 96.2;
-        ball.current.vx = -Math.abs(ball.current.vx);
-        juice.playSound('ricochet');
-        juice.addTrauma(0.12);
-        juice.emitSparks((ball.current.x / 100) * W, (ball.current.y / 100) * H, 8, '#38bdf8', '#0ea5e9', 3);
-      }
-
-      // 5. Paddle Collisions
-      const myPad = myPaddle.current;
-      const bY = ball.current.y;
-      const bX = ball.current.x;
-
-      // Bottom Paddle (YOU) Strike Check
-      if (
-        bY >= myPad.y - PADDLE_HALF_H - 1.2 &&
-        bY <= myPad.y + PADDLE_HALF_H + 1.2 &&
-        ball.current.vy > 0
-      ) {
-        const diffX = bX - myPad.x;
-        if (Math.abs(diffX) <= PADDLE_HALF_W + 3) {
-          ball.current.y = myPad.y - PADDLE_HALF_H - 1.2;
-          ball.current.vy = -Math.abs(ball.current.vy);
-
-          // Angle deflection based on hit location
-          const normOffset = diffX / PADDLE_HALF_W;
-          ball.current.vx = normOffset * 0.72 + myPad.vx * 0.18;
-          ball.current.spin = myPad.vx * 0.35;
-          ball.current.speed = Math.min(2.1, ball.current.speed * 1.05);
-
-          soundService.playImpact(1.15);
-          juice.addTrauma(0.22);
-          juice.emitSparks((bX / 100) * W, (bY / 100) * H, 14, '#38bdf8', '#0284c7', 4);
+          // Ball moving away: gently return to center table
+          const centerSpeed = 120 * dt;
+          if (oppPaddleX.current < W / 2 - 10) oppPaddleX.current += centerSpeed;
+          else if (oppPaddleX.current > W / 2 + 10) oppPaddleX.current -= centerSpeed;
         }
       }
 
-      // Top Paddle (OPPONENT / BOT) Strike Check
-      const opPad = oppPaddle.current;
-      if (
-        bY <= opPad.y + PADDLE_HALF_H + 1.2 &&
-        bY >= opPad.y - PADDLE_HALF_H - 1.2 &&
-        ball.current.vy < 0
-      ) {
-        const diffX = bX - opPad.x;
-        if (Math.abs(diffX) <= PADDLE_HALF_W + 3) {
-          ball.current.y = opPad.y + PADDLE_HALF_H + 1.2;
-          ball.current.vy = Math.abs(ball.current.vy);
+      // Ball Physics
+      const b = ball.current;
+      const prevY = b.y;
+      const spd = b.speed;
+      b.x += b.vx * spd * dt * 60;
+      b.y += b.vy * spd * dt * 60;
 
-          const normOffset = diffX / PADDLE_HALF_W;
-          ball.current.vx = normOffset * 0.72 + opPad.vx * 0.18;
-          ball.current.spin = opPad.vx * 0.35;
-          ball.current.speed = Math.min(2.1, ball.current.speed * 1.05);
+      // Side Table Rubber Rails Bounce
+      if (b.x <= BALL_R + 8) {
+        b.x = BALL_R + 8;
+        b.vx = Math.abs(b.vx);
+        soundService.playImpact(0.8);
+        juice.emitSparks(b.x, b.y, 6, '#38bdf8', '#0ea5e9', 2);
+      } else if (b.x >= W - BALL_R - 8) {
+        b.x = W - BALL_R - 8;
+        b.vx = -Math.abs(b.vx);
+        soundService.playImpact(0.8);
+        juice.emitSparks(b.x, b.y, 6, '#38bdf8', '#0ea5e9', 2);
+      }
 
-          soundService.playImpact(1.15);
-          juice.addTrauma(0.22);
-          juice.emitSparks((bX / 100) * W, (bY / 100) * H, 14, '#f43f5e', '#be123c', 4);
+      // Continuous Bottom Paddle Collision Check (YOU)
+      if (prevY <= PADDLE_BOTTOM_Y && b.y >= PADDLE_BOTTOM_Y && b.vy > 0) {
+        const halfW = PADDLE_W / 2 + BALL_R;
+        if (Math.abs(b.x - myPaddleX.current) <= halfW) {
+          b.y = PADDLE_BOTTOM_Y - 1;
+          b.vy = -Math.abs(b.vy);
+
+          // Angle deflection based on hit location (-1 on left edge, +1 on right edge)
+          const offset = (b.x - myPaddleX.current) / (PADDLE_W / 2);
+          b.vx = offset * 5.2 + (paddleVx * 0.25);
+          b.speed = Math.min(1.9, b.speed * 1.04);
+
+          soundService.playImpact(1.2);
+          juice.addTrauma(0.2);
+          juice.emitSparks(b.x, PADDLE_BOTTOM_Y, 12, '#38bdf8', '#0284c7', 3.5);
+          if (navigator.vibrate) navigator.vibrate(15);
         }
       }
 
-      // 6. Goal Scoring Detection
-      // Top Baseline Passed -> YOU (Bottom) Scores!
-      if (ball.current.y <= 1.0) {
-        goalCooldown.current = 1.4;
+      // Continuous Top Paddle Collision Check (OPPONENT / BOT)
+      if (prevY >= PADDLE_TOP_Y && b.y <= PADDLE_TOP_Y && b.vy < 0) {
+        const halfW = PADDLE_W / 2 + BALL_R;
+        if (Math.abs(b.x - oppPaddleX.current) <= halfW) {
+          b.y = PADDLE_TOP_Y + 1;
+          b.vy = Math.abs(b.vy);
+
+          const offset = (b.x - oppPaddleX.current) / (PADDLE_W / 2);
+          b.vx = offset * 5.2;
+          b.speed = Math.min(1.9, b.speed * 1.04);
+
+          soundService.playImpact(1.2);
+          juice.addTrauma(0.2);
+          juice.emitSparks(b.x, PADDLE_TOP_Y, 12, '#f43f5e', '#be123c', 3.5);
+        }
+      }
+
+      // Goal Scored Detection
+      // Top Goal: YOU (Bottom) Scored!
+      if (b.y < -5) {
+        goalCooldown.current = 1.0;
         const banner = { name: p1Nickname, isP1: true };
         scorerBannerRef.current = banner;
         setScorerBanner(banner);
         soundService.playGoal();
-        juice.addTrauma(0.6);
-        juice.emitExplosion((ball.current.x / 100) * W, 20, 40);
+        juice.addTrauma(0.5);
+        juice.emitExplosion(b.x, 20, 35);
 
         onDispatchAction('PONG_GOAL', { scorerUid: bottomUid, actingUid: playerUid });
         serve(false);
       }
 
-      // Bottom Baseline Passed -> OPPONENT (Top) Scores!
-      if (ball.current.y >= 99.0) {
-        goalCooldown.current = 1.4;
+      // Bottom Goal: OPPONENT (Top) Scored!
+      if (b.y > H + 5) {
+        goalCooldown.current = 1.0;
         const banner = { name: p2Nickname, isP1: false };
         scorerBannerRef.current = banner;
         setScorerBanner(banner);
         soundService.playGoal();
-        juice.addTrauma(0.6);
-        juice.emitExplosion((ball.current.x / 100) * W, H - 20, 40);
+        juice.addTrauma(0.5);
+        juice.emitExplosion(b.x, H - 20, 35);
 
         onDispatchAction('PONG_GOAL', { scorerUid: topUid, actingUid: playerUid });
         serve(true);
       }
-
-      // 7. Update Particle Trail
-      trail.unshift({ x: ball.current.x, y: ball.current.y, alpha: 1.0 });
-      if (trail.length > TRAIL_MAX) trail.pop();
-      for (const t of trail) t.alpha *= 0.84;
     };
 
     const render = () => {
@@ -310,7 +282,7 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
       const scaleY = canvasMgr.height / H;
       ctx.scale(scaleX, scaleY);
 
-      // 1. Play Store Classic Emerald Tournament Table
+      // 1. Classic Dark Green Tournament Table Tennis Surface
       const tableGrad = ctx.createLinearGradient(0, 0, 0, H);
       tableGrad.addColorStop(0, '#064e3b');
       tableGrad.addColorStop(0.5, '#047857');
@@ -318,172 +290,146 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
       ctx.fillStyle = tableGrad;
       ctx.fillRect(0, 0, W, H);
 
-      // Dark Wood Table Bevel Outer Frame
+      // Dark Outer Bevel
       ctx.strokeStyle = '#022c22';
-      ctx.lineWidth = 12;
-      ctx.strokeRect(6, 6, W - 12, H - 12);
+      ctx.lineWidth = 14;
+      ctx.strokeRect(7, 7, W - 14, H - 14);
 
       // White Tournament Border Lines
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 3;
       ctx.strokeRect(16, 16, W - 32, H - 32);
 
-      // White Center Longitudinal Service Line
+      // Center Longitudinal Line
       ctx.beginPath();
       ctx.moveTo(W / 2, 16);
       ctx.lineTo(W / 2, H - 16);
       ctx.stroke();
 
       // Center 3D Net with Realistic Drop Shadow
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-      ctx.fillRect(4, H / 2 + 3, W - 8, 6);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+      ctx.fillRect(8, H / 2 + 3, W - 16, 5);
 
-      // Net body
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-      ctx.fillRect(6, H / 2 - 2, W - 12, 4);
+      // White Net mesh line
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(10, H / 2 - 2, W - 20, 4);
 
-      // Net metal posts on table edges
-      ctx.fillStyle = '#94a3b8';
-      ctx.fillRect(2, H / 2 - 9, 8, 18);
-      ctx.fillRect(W - 10, H / 2 - 9, 8, 18);
+      // Metal net posts
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillRect(6, H / 2 - 8, 8, 16);
+      ctx.fillRect(W - 14, H / 2 - 8, 8, 16);
 
-      // 2. Play Store Large Floor Score Numerals (Painted onto table)
+      // 2. Giant Floor Scores (Painted on table felt)
       const p1Score = room.scores[bottomUid] || 0;
       const p2Score = room.scores[topUid] || 0;
-      ctx.font = '900 88px "Outfit", sans-serif';
+      ctx.font = '900 84px "Outfit", sans-serif';
       ctx.textAlign = 'center';
 
-      // Top Player Floor Score
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+      // Top Score
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
       ctx.fillText(String(p2Score), W / 2, H / 2 - 60);
 
-      // Bottom Player Floor Score
+      // Bottom Score
       ctx.fillText(String(p1Score), W / 2, H / 2 + 120);
 
-      // 3. Render 3D White Table Tennis Ball with Height Shadow
-      const bx = (ball.current.x / 100) * W;
-      const by = (ball.current.y / 100) * H;
-      const ballRadius = 12;
-      const arc = ball.current.arcHeight || 0;
+      // 3. Render 3D White Table Tennis Ball
+      const bx = ball.current.x;
+      const by = ball.current.y;
 
-      // Drop shadow on table (contracts and offsets as ball rises)
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+      // Ball shadow directly beneath
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
       ctx.beginPath();
-      ctx.ellipse(
-        bx,
-        by + 6 + arc * 0.4,
-        Math.max(6, ballRadius * 1.05 - arc * 0.2),
-        Math.max(3, ballRadius * 0.55 - arc * 0.1),
-        0,
-        0,
-        Math.PI * 2
-      );
+      ctx.ellipse(bx, by + 5, BALL_R * 1.1, BALL_R * 0.55, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // Ball Trail
-      for (const pt of trail) {
-        if (pt.alpha > 0.05) {
-          ctx.fillStyle = `rgba(255, 255, 255, ${pt.alpha * 0.32})`;
-          ctx.beginPath();
-          ctx.arc((pt.x / 100) * W, (pt.y / 100) * H - arc, ballRadius * pt.alpha * 0.75, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-
-      // White Sphere with Radial Specular Highlight
-      const ballShade = ctx.createRadialGradient(bx - 3, by - 3 - arc, 2, bx, by - arc, ballRadius);
+      // White 3D Sphere
+      const ballShade = ctx.createRadialGradient(bx - 3, by - 3, 2, bx, by, BALL_R);
       ballShade.addColorStop(0, '#ffffff');
-      ballShade.addColorStop(0.75, '#f1f5f9');
+      ballShade.addColorStop(0.75, '#f8fafc');
       ballShade.addColorStop(1, '#cbd5e1');
       ctx.fillStyle = ballShade;
       ctx.beginPath();
-      ctx.arc(bx, by - arc, ballRadius, 0, Math.PI * 2);
+      ctx.arc(bx, by, BALL_R, 0, Math.PI * 2);
       ctx.fill();
 
-      // Subtle ball rim
       ctx.strokeStyle = '#94a3b8';
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // 4. Render Paddles (Authentic Play Store Table Tennis Styling)
-      const padW = (PADDLE_W / 100) * W;
-      const padH = (PADDLE_H / 100) * H;
-
+      // 4. Render Paddles
       // Top Paddle (Opponent / Crimson Red Rubber)
-      const tx = (oppPaddle.current.x / 100) * W;
-      const ty = (oppPaddle.current.y / 100) * H;
+      const tx = oppPaddleX.current;
+      const ty = PADDLE_TOP_Y;
 
       // Drop shadow
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
       ctx.beginPath();
-      ctx.roundRect(tx - padW / 2, ty - padH / 2 + 5, padW, padH, 8);
+      ctx.roundRect(tx - PADDLE_W / 2, ty - PADDLE_H / 2 + 4, PADDLE_W, PADDLE_H, 8);
       ctx.fill();
 
-      // Paddle wood handle
+      // Wood handle
       ctx.fillStyle = '#b45309';
-      ctx.fillRect(tx - 6, ty - padH / 2 - 13, 12, 13);
+      ctx.fillRect(tx - 6, ty - PADDLE_H / 2 - 12, 12, 12);
 
       // Red rubber body
-      const gradTop = ctx.createLinearGradient(tx, ty - padH / 2, tx, ty + padH / 2);
+      const gradTop = ctx.createLinearGradient(tx, ty - PADDLE_H / 2, tx, ty + PADDLE_H / 2);
       gradTop.addColorStop(0, '#f43f5e');
       gradTop.addColorStop(1, '#be123c');
       ctx.fillStyle = gradTop;
       ctx.beginPath();
-      ctx.roundRect(tx - padW / 2, ty - padH / 2, padW, padH, 8);
+      ctx.roundRect(tx - PADDLE_W / 2, ty - PADDLE_H / 2, PADDLE_W, PADDLE_H, 8);
       ctx.fill();
 
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Top Paddle Label
       ctx.fillStyle = '#ffffff';
       ctx.font = '900 11px "Outfit", sans-serif';
-      ctx.fillText(p2Nickname.substring(0, 10).toUpperCase(), tx, ty - padH / 2 - 16);
+      ctx.fillText(p2Nickname.substring(0, 10).toUpperCase(), tx, ty - PADDLE_H / 2 - 16);
 
       // Bottom Paddle (YOU / Royal Blue & Cyan Rubber)
-      const mx = (myPaddle.current.x / 100) * W;
-      const my = (myPaddle.current.y / 100) * H;
+      const mx = myPaddleX.current;
+      const my = PADDLE_BOTTOM_Y;
 
       // Drop shadow
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
       ctx.beginPath();
-      ctx.roundRect(mx - padW / 2, my - padH / 2 + 5, padW, padH, 8);
+      ctx.roundRect(mx - PADDLE_W / 2, my - PADDLE_H / 2 + 4, PADDLE_W, PADDLE_H, 8);
       ctx.fill();
 
-      // Handle
+      // Wood handle
       ctx.fillStyle = '#b45309';
-      ctx.fillRect(mx - 6, my + padH / 2, 12, 13);
+      ctx.fillRect(mx - 6, my + PADDLE_H / 2, 12, 12);
 
       // Blue rubber body
-      const gradBot = ctx.createLinearGradient(mx, my - padH / 2, mx, my + padH / 2);
+      const gradBot = ctx.createLinearGradient(mx, my - PADDLE_H / 2, mx, my + PADDLE_H / 2);
       gradBot.addColorStop(0, '#38bdf8');
       gradBot.addColorStop(1, '#0284c7');
       ctx.fillStyle = gradBot;
       ctx.beginPath();
-      ctx.roundRect(mx - padW / 2, my - padH / 2, padW, padH, 8);
+      ctx.roundRect(mx - PADDLE_W / 2, my - PADDLE_H / 2, PADDLE_W, PADDLE_H, 8);
       ctx.fill();
 
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // "YOU" Label
       ctx.fillStyle = '#ffffff';
-      ctx.font = '900 12px "Outfit", sans-serif';
-      ctx.fillText('▼ YOU', mx, my + padH / 2 + 25);
+      ctx.font = '900 11px "Outfit", sans-serif';
+      ctx.fillText('▼ YOU', mx, my + PADDLE_H / 2 + 24);
 
       // 5. Goal Celebration Overlay
       const banner = scorerBannerRef.current || scorerBanner;
       if (goalCooldown.current > 0 && banner) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
         ctx.fillRect(0, 0, W, H);
 
         ctx.fillStyle = banner.isP1 ? '#38bdf8' : '#f43f5e';
         ctx.shadowColor = banner.isP1 ? '#0284c7' : '#be123c';
-        ctx.shadowBlur = 20;
+        ctx.shadowBlur = 18;
         ctx.font = '900 48px "Outfit", sans-serif';
-        ctx.fillText('POINT!', W / 2, H / 2 - 12);
+        ctx.fillText('POINT!', W / 2, H / 2 - 10);
         ctx.shadowBlur = 0;
 
         ctx.fillStyle = '#ffffff';
@@ -492,8 +438,6 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
       }
 
       ctx.restore();
-
-      // Particle system overlay
       juice.renderParticles(canvasMgr.ctx, canvasMgr.width / W);
     };
 
@@ -533,8 +477,8 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
         </div>
       </div>
 
-      {/* Tournament Table Tennis Canvas - Fits screen perfectly without vertical scroll */}
-      <div className="w-full h-[52vh] min-h-[340px] max-h-[500px] aspect-[480/680] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 relative bg-[#064e3b] cursor-pointer">
+      {/* Tournament Table Tennis Court - 1:1 Direct Tracking */}
+      <div className="w-full h-[52vh] min-h-[340px] max-h-[500px] aspect-[460/640] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 relative bg-[#064e3b] cursor-pointer">
         <canvas
           ref={canvasRef}
           style={{ touchAction: 'none' }}
@@ -574,7 +518,7 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
       </div>
 
       <p className="text-[10px] text-slate-400 font-mono text-center">
-        👆 Touch & drag paddle directly • Or tap buttons / Arrow keys!
+        👆 Drag finger anywhere on court to glide paddle • Deflect with angles to score!
       </p>
     </div>
   );

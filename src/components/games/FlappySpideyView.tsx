@@ -236,11 +236,11 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Load authentic vector Spider-Man sprite
-    const spideySprite = new Image();
-    spideySprite.src = '/assets/spidey_sprite.svg';
+    // Load authentic real Spider-Man sprite
+    const spideyRealImg = new Image();
+    spideyRealImg.src = '/assets/spidey_real.png';
     let isSpriteReady = false;
-    spideySprite.onload = () => {
+    spideyRealImg.onload = () => {
       isSpriteReady = true;
     };
 
@@ -325,8 +325,8 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
         life: 0.18
       };
 
+      // Crisp web shoot audio, zero water droplets
       juice.playSound('spark');
-      juice.emitSparks(SPIDEY_X, spideyY, 6, '#38bdf8', '#06b6d4', 2.5);
       if (navigator.vibrate) navigator.vibrate(18);
     };
 
@@ -599,19 +599,27 @@ export const FlappySpideyView: React.FC<FlappySpideyViewProps> = ({
         ctx.restore();
       }
 
-      // 6. Authentic Marvel Spider-Man Hero Character Rendering
+      // 6. Authentic Marvel Spider-Man Character Rendering
       ctx.save();
       ctx.translate(SPIDEY_X, spideyY);
       ctx.rotate(spideyAngle);
 
-      // Neon Spider-Red Specular Backlight Aura
-      const isPlunging = spideyAngle > 0.3;
-      ctx.shadowColor = isPlunging ? '#be123c' : '#dc2626';
-      ctx.shadowBlur = isPlunging ? 8 : 16;
-
-      // Draw Marvel Spider-Man with 100% vector precision
-      drawMarvelSpiderMan(ctx, Boolean(webAnchor), spideyAngle, timeElapsed);
-      ctx.shadowBlur = 0;
+      if (isSpriteReady && spideyRealImg.complete && spideyRealImg.naturalWidth > 0) {
+        // Real Marvel Spider-Man photographic game sprite
+        const spriteW = 100;
+        const spriteH = 44;
+        ctx.shadowColor = '#e11d48';
+        ctx.shadowBlur = 10;
+        ctx.drawImage(spideyRealImg, -spriteW / 2 + 5, -spriteH / 2, spriteW, spriteH);
+        ctx.shadowBlur = 0;
+      } else {
+        // Procedural vector fallback
+        const isPlunging = spideyAngle > 0.3;
+        ctx.shadowColor = isPlunging ? '#be123c' : '#dc2626';
+        ctx.shadowBlur = isPlunging ? 8 : 16;
+        drawMarvelSpiderMan(ctx, Boolean(webAnchor), spideyAngle, timeElapsed);
+        ctx.shadowBlur = 0;
+      }
 
       ctx.restore();
 

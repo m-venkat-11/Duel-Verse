@@ -31,7 +31,19 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
   // Jump State
   const [isJumpingState, setIsJumpingState] = useState<boolean>(false);
 
-  // Runners in world coordinates (Track: X: 40 to 440, Y: 80 to 2000)
+  // Track Dimensions: W = 460, H = 640
+  // Track extends from Y = 1900 (Start) UPWARDS to Y = 100 (Finish Arch)
+  const W = 460;
+  const H = 640;
+  const TRACK_LEFT = 40;
+  const TRACK_RIGHT = 420;
+  const TRACK_WIDTH = TRACK_RIGHT - TRACK_LEFT;
+
+  const START_Y = 1750;
+  const FINISH_Y = 140;
+  const TOTAL_DISTANCE = START_Y - FINISH_Y;
+
+  // Runners in world coordinates (running UPWARDS towards Y = 140)
   const runners = useRef<{
     [uid: string]: {
       x: number;
@@ -39,7 +51,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       z: number; // Vertical jump height
       vx: number;
       vy: number;
-      jumpTimer: number; // In air timer (0.5s duration)
+      jumpTimer: number;
       isJumping: boolean;
       stunTimer: number;
       boostTimer: number;
@@ -52,20 +64,16 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
   }>({});
 
   const keysDown = useRef<{ [key: string]: boolean }>({});
-  const mobileInput = useRef({ left: false, right: false, up: false, jump: false });
-  const touchJoystick = useRef<{ active: boolean; startX: number; startY: number; currX: number; currY: number }>({
+  const mobileInput = useRef({ left: false, right: false, up: false, down: false });
+  const touchJoystick = useRef<{ active: boolean; startX: number; currX: number }>({
     active: false,
     startX: 0,
-    startY: 0,
-    currX: 0,
-    currY: 0
+    currX: 0
   });
 
   const lastNetworkDispatch = useRef<number>(0);
-  const COURSE_LEN = 2000;
-  const FINISH_Y = 1880;
 
-  // Keyboard controls (WASD, Arrows, Space to Jump)
+  // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
@@ -102,8 +110,8 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
   // Reset race state on round change
   const resetRace = () => {
     runners.current = {
-      [p1Uid]: { x: 160, y: 120, z: 0, vx: 0, vy: 0, jumpTimer: 0, isJumping: false, stunTimer: 0, boostTimer: 0, animPhase: 0 },
-      [p2Uid]: { x: 320, y: 120, z: 0, vx: 0, vy: 0, jumpTimer: 0, isJumping: false, stunTimer: 0, boostTimer: 0, animPhase: 0 }
+      [p1Uid]: { x: 160, y: START_Y, z: 0, vx: 0, vy: 0, jumpTimer: 0, isJumping: false, stunTimer: 0, boostTimer: 0, animPhase: 0 },
+      [p2Uid]: { x: 300, y: START_Y, z: 0, vx: 0, vy: 0, jumpTimer: 0, isJumping: false, stunTimer: 0, boostTimer: 0, animPhase: 0 }
     };
     finishDispatched.current = false;
     raceWinnerRef.current = null;
@@ -119,10 +127,10 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
     if (!me || me.isJumping || me.stunTimer > 0 || finishDispatched.current) return;
 
     me.isJumping = true;
-    me.jumpTimer = 0.52;
+    me.jumpTimer = 0.54;
     setIsJumpingState(true);
     soundService.playCountdown(1);
-    if (navigator.vibrate) navigator.vibrate(25);
+    if (navigator.vibrate) navigator.vibrate(20);
   };
 
   // Main 60 FPS Game Loop
@@ -133,45 +141,38 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
     const canvasMgr = new CanvasManager(canvas);
     const juice = new JuiceEngine(350);
 
-    const W = 480;
-    const H = 640;
-    const TRACK_LEFT = 40;
-    const TRACK_RIGHT = 440;
-    const TRACK_WIDTH = TRACK_RIGHT - TRACK_LEFT;
-
-    // Course Hazards Configuration
-    const rotatingHammers = [
-      { y: 460, x: 240, radius: 95, angle: 0, speed: 2.6 },
-      { y: 1040, x: 240, radius: 105, angle: Math.PI / 4, speed: -2.8 },
-      { y: 1580, x: 240, radius: 100, angle: Math.PI / 2, speed: 2.7 }
-    ];
-
-    const slidingBumpers = [
-      { y: 740, w: 140, h: 26, x: 100, minX: 50, maxX: 290, dir: 1, speed: 175 },
-      { y: 1320, w: 140, h: 26, x: 250, minX: 50, maxX: 290, dir: -1, speed: 185 }
-    ];
-
+    // Course Hazards Configuration (spaced along Y = 1750 down to Y = 140)
     const turboPads = [
-      { x: 140, y: 280, w: 70, h: 44 },
-      { x: 330, y: 880, w: 70, h: 44 },
-      { x: 205, y: 1420, w: 70, h: 44 }
+      { x: 140, y: 1520, w: 70, h: 44 },
+      { x: 260, y: 920, w: 70, h: 44 },
+      { x: 195, y: 440, w: 70, h: 44 }
+    ];
+
+    const rotatingHammers = [
+      { y: 1360, x: 230, radius: 95, angle: 0, speed: 2.5 },
+      { y: 800, x: 230, radius: 100, angle: Math.PI / 4, speed: -2.7 },
+      { y: 360, x: 230, radius: 95, angle: Math.PI / 2, speed: 2.6 }
     ];
 
     const mudZones = [
-      { x: 80, y: 580, w: 320, h: 90 },
-      { x: 80, y: 1180, w: 320, h: 90 }
+      { x: 70, y: 1140, w: 320, h: 90 },
+      { x: 70, y: 580, w: 320, h: 90 }
     ];
 
-    // Dynamic Touch Joystick on Left Screen Half
+    const slidingBumpers = [
+      { y: 980, w: 140, h: 26, x: 90, minX: 50, maxX: 270, dir: 1, speed: 175 },
+      { y: 460, w: 140, h: 26, x: 230, minX: 50, maxX: 270, dir: -1, speed: 185 }
+    ];
+
+    // Touch dragging anywhere on canvas to steer
     const handlePointerDown = (e: PointerEvent) => {
       e.preventDefault();
       try { canvas.setPointerCapture(e.pointerId); } catch {}
       const rect = canvas.getBoundingClientRect();
       const px = ((e.clientX - rect.left) / rect.width) * W;
-      const py = ((e.clientY - rect.top) / rect.height) * H;
 
-      // Tap on right half triggers jump
-      if (px > W * 0.65) {
+      // Tap on bottom-right triggers jump
+      if (px > W * 0.7) {
         triggerJump();
         return;
       }
@@ -179,9 +180,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       touchJoystick.current = {
         active: true,
         startX: px,
-        startY: py,
-        currX: px,
-        currY: py
+        currX: px
       };
     };
 
@@ -190,7 +189,6 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       e.preventDefault();
       const rect = canvas.getBoundingClientRect();
       touchJoystick.current.currX = ((e.clientX - rect.left) / rect.width) * W;
-      touchJoystick.current.currY = ((e.clientY - rect.top) / rect.height) * H;
     };
 
     const handlePointerUp = () => {
@@ -206,7 +204,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       juice.update(dt);
       const now = Date.now();
 
-      // 1. Update Dynamic Course Hazards
+      // Update Hazards
       rotatingHammers.forEach((h) => {
         h.angle += h.speed * dt;
       });
@@ -222,7 +220,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         }
       });
 
-      // 2. Update Human Runner Movement
+      // Update Player Runner Movement
       const me = runners.current[playerUid];
       if (me) {
         // Handle Jump Arc
@@ -233,11 +231,9 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
             me.jumpTimer = 0;
             me.z = 0;
             setIsJumpingState(false);
-            // Landing dust
             juice.emitSparks(me.x, me.y, 6, '#cbd5e1', '#94a3b8', 2);
           } else {
-            // Parabolic jump arc: peak height 36px
-            const progress = (0.52 - me.jumpTimer) / 0.52;
+            const progress = (0.54 - me.jumpTimer) / 0.54;
             me.z = Math.sin(progress * Math.PI) * 36;
           }
         }
@@ -247,42 +243,35 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
           me.vx *= 0.88;
           me.vy *= 0.88;
         } else {
-          // Joystick vector
-          let moveX = 0;
-          let moveY = 0;
+          // Steering input
+          let steerX = 0;
 
           if (touchJoystick.current.active) {
-            const jx = touchJoystick.current.currX - touchJoystick.current.startX;
-            const jy = touchJoystick.current.currY - touchJoystick.current.startY;
-            const dist = Math.hypot(jx, jy);
-            if (dist > 6) {
-              const maxDist = 50;
-              const factor = Math.min(1, dist / maxDist);
-              moveX = (jx / dist) * factor;
-              moveY = (jy / dist) * factor;
+            const dx = touchJoystick.current.currX - touchJoystick.current.startX;
+            if (Math.abs(dx) > 6) {
+              steerX = Math.max(-1, Math.min(1, dx / 40));
             }
           }
 
-          // Keyboard / Button inputs
           const isLeft = keysDown.current['arrowleft'] || keysDown.current['a'] || mobileInput.current.left;
           const isRight = keysDown.current['arrowright'] || keysDown.current['d'] || mobileInput.current.right;
           const isUp = keysDown.current['arrowup'] || keysDown.current['w'] || mobileInput.current.up;
-          const isDown = keysDown.current['arrowdown'] || keysDown.current['s'];
+          const isDown = keysDown.current['arrowdown'] || keysDown.current['s'] || mobileInput.current.down;
 
-          if (isLeft) moveX = -1;
-          if (isRight) moveX = 1;
-          if (isUp) moveY = 1;
-          if (isDown) moveY = -0.5;
+          if (isLeft) steerX = -1;
+          if (isRight) steerX = 1;
 
-          // Default auto-running pace along course
-          let forwardSpeed = 205;
+          // Forward running speed (Running UPWARDS: vy is negative!)
+          let forwardSpeed = 180;
+          if (isUp) forwardSpeed = 230;
+          if (isDown) forwardSpeed = 110;
 
           if (me.boostTimer > 0) {
             me.boostTimer -= dt;
-            forwardSpeed = 350; // Super turbo boost!
+            forwardSpeed = 340; // Turbo boost!
           }
 
-          // Check Mud Zone: only slows down if on the ground (jumping avoids mud!)
+          // Check Mud Zone slowdown (only if grounded; jumping completely clears mud!)
           if (!me.isJumping) {
             for (const m of mudZones) {
               if (me.x >= m.x && me.x <= m.x + m.w && me.y >= m.y && me.y <= m.y + m.h) {
@@ -292,9 +281,8 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
             }
           }
 
-          const lateralSpeed = 240;
-          me.vx = moveX * lateralSpeed;
-          me.vy = forwardSpeed + (moveY > 0 ? moveY * 55 : moveY * 70);
+          me.vx = steerX * 240;
+          me.vy = -forwardSpeed; // Negative VY = moving UPWARDS towards finish arch!
 
           if (forwardSpeed > 0) {
             me.animPhase += dt * 14;
@@ -304,8 +292,8 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         me.x = Math.max(TRACK_LEFT + 16, Math.min(TRACK_RIGHT - 16, me.x + me.vx * dt));
         me.y += me.vy * dt;
 
-        // Check Turbo Pads (only if grounded or low)
-        if (me.z < 12) {
+        // Check Turbo Boost Pads (low altitude)
+        if (me.z < 14) {
           for (const tp of turboPads) {
             if (
               me.x >= tp.x - 10 &&
@@ -317,13 +305,13 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
                 me.boostTimer = 0.95;
                 soundService.playScore();
                 juice.addTrauma(0.15);
-                juice.emitSparks(me.x, me.y, 16, '#10b981', '#34d399', 5);
+                juice.emitSparks(me.x, me.y, 14, '#10b981', '#34d399', 4);
               }
             }
           }
         }
 
-        // Check Rotating Spiked Hammers (jump high enough can dodge)
+        // Check Rotating Spiked Hammers
         if (me.z < 24) {
           for (const rh of rotatingHammers) {
             for (let a = 0; a < 4; a++) {
@@ -332,12 +320,12 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
               const hy = rh.y + Math.sin(armAngle) * rh.radius * 0.72;
               const dist = Math.hypot(me.x - hx, me.y - hy);
 
-              if (dist < 25 && me.stunTimer <= 0) {
+              if (dist < 24 && me.stunTimer <= 0) {
                 me.stunTimer = 0.55;
-                me.vx = Math.cos(armAngle) * 260;
-                me.vy = -180; // Knocks runner backwards!
+                me.vx = Math.cos(armAngle) * 240;
+                me.vy = 180; // Knocks runner BACKWARDS (downward)!
                 soundService.playImpact(1.3);
-                juice.addTrauma(0.45);
+                juice.addTrauma(0.4);
                 juice.emitExplosion(me.x, me.y, 22);
                 break;
               }
@@ -345,7 +333,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
           }
         }
 
-        // Check Sliding Bumpers (jumping clears bumper!)
+        // Check Sliding Bumpers
         if (me.z < 18) {
           for (const sb of slidingBumpers) {
             if (
@@ -356,11 +344,11 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
               me.stunTimer <= 0
             ) {
               me.stunTimer = 0.45;
-              me.vx = sb.dir * 240;
-              me.vy = -150;
+              me.vx = sb.dir * 220;
+              me.vy = 160;
               soundService.playImpact(1.2);
               juice.addTrauma(0.35);
-              juice.emitSparks(me.x, me.y, 14, '#f43f5e', '#fb7185', 4);
+              juice.emitSparks(me.x, me.y, 12, '#f43f5e', '#fb7185', 3.5);
             }
           }
         }
@@ -378,7 +366,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         }
       }
 
-      // 3. CyberBot AI Runner (Play Store Standard)
+      // CyberBot AI Runner: Competes naturally and runs UPWARDS
       const bot = runners.current[p2Uid];
       if (bot && isBotPlaying) {
         if (bot.isJumping) {
@@ -388,7 +376,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
             bot.jumpTimer = 0;
             bot.z = 0;
           } else {
-            const progress = (0.52 - bot.jumpTimer) / 0.52;
+            const progress = (0.54 - bot.jumpTimer) / 0.54;
             bot.z = Math.sin(progress * Math.PI) * 36;
           }
         }
@@ -398,34 +386,34 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
           bot.vx *= 0.88;
           bot.vy *= 0.88;
         } else {
-          let botSpeed = 208; // Competitive human-matched speed
+          let botSpeed = 182; // Human-matched pace
 
           if (bot.boostTimer > 0) {
             bot.boostTimer -= dt;
-            botSpeed = 350;
+            botSpeed = 340;
           }
 
-          // Bot Target: aim for upcoming turbo pads
-          let targetX = 240;
-          const nextPad = turboPads.find((tp) => tp.y > bot.y && tp.y < bot.y + 240);
+          // Bot target: seek turbo pads
+          let targetX = 230;
+          const nextPad = turboPads.find((tp) => tp.y < bot.y && tp.y > bot.y - 240);
           if (nextPad) targetX = nextPad.x + nextPad.w / 2;
 
-          // Bot Jump over mud
-          const upcomingMud = mudZones.find((m) => bot.y >= m.y - 30 && bot.y <= m.y + 20);
-          if (upcomingMud && !bot.isJumping && Math.random() < 0.8) {
+          // Bot jumps over mud
+          const upcomingMud = mudZones.find((m) => bot.y <= m.y + m.h + 30 && bot.y >= m.y);
+          if (upcomingMud && !bot.isJumping && Math.random() < 0.75) {
             bot.isJumping = true;
-            bot.jumpTimer = 0.52;
+            bot.jumpTimer = 0.54;
           }
 
-          // Bot Avoid rotating hammers
-          const nearHammer = rotatingHammers.find((rh) => Math.abs(rh.y - bot.y) < 100);
+          // Bot avoids rotating hammers
+          const nearHammer = rotatingHammers.find((rh) => Math.abs(rh.y - bot.y) < 95);
           if (nearHammer) {
-            targetX = bot.x > 240 ? TRACK_RIGHT - 35 : TRACK_LEFT + 35;
+            targetX = bot.x > 230 ? TRACK_RIGHT - 30 : TRACK_LEFT + 30;
           }
 
           bot.x += (targetX - bot.x) * 0.1;
           bot.x = Math.max(TRACK_LEFT + 16, Math.min(TRACK_RIGHT - 16, bot.x));
-          bot.y += botSpeed * dt;
+          bot.y -= botSpeed * dt; // Moving UPWARDS towards finish arch!
           bot.animPhase += dt * 14;
 
           // Check Turbo Pads for Bot
@@ -454,9 +442,9 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         }
       }
 
-      // 4. Finish Line Cross Check
+      // Finish Line Cross Check (Y <= FINISH_Y)
       for (const [uid, runner] of Object.entries(runners.current)) {
-        if (runner.y >= FINISH_Y && !finishDispatched.current) {
+        if (runner.y <= FINISH_Y && !finishDispatched.current) {
           finishDispatched.current = true;
           const victor = uid === p1Uid ? p1Nickname : p2Nickname;
           raceWinnerRef.current = victor;
@@ -481,80 +469,74 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       const scaleY = canvasMgr.height / H;
       ctx.scale(scaleX, scaleY);
 
-      // Camera smoothly tracks player Y position forward
-      const me = runners.current[playerUid] || { x: 240, y: 120 };
-      const camY = Math.max(0, Math.min(COURSE_LEN - H + 60, me.y - H * 0.65));
+      // Camera smoothly tracks player Y position forward (looking UPWARDS ahead)
+      const me = runners.current[playerUid] || { x: 230, y: START_Y };
+      // Cam shows track ahead: runner is placed around 70% down the screen
+      const camY = Math.max(0, Math.min(START_Y - H + 120, me.y - H * 0.7));
 
       ctx.save();
       ctx.translate(0, -camY);
 
-      // 1. Deep Cyber Platform Arena
+      // 1. Cyber Race Track Background
       ctx.fillStyle = '#050914';
-      ctx.fillRect(0, 0, W, COURSE_LEN + 300);
+      ctx.fillRect(0, 0, W, START_Y + 250);
 
       // Asphalt Track Platform
       ctx.fillStyle = '#0f172a';
-      ctx.fillRect(TRACK_LEFT, 0, TRACK_WIDTH, COURSE_LEN + 200);
+      ctx.fillRect(TRACK_LEFT, 50, TRACK_WIDTH, START_Y + 100);
 
-      // Neon Track Guardrails with Glow
+      // Neon Guardrails
       ctx.strokeStyle = '#06b6d4';
       ctx.lineWidth = 4;
       ctx.shadowColor = '#06b6d4';
       ctx.shadowBlur = 10;
       ctx.beginPath();
-      ctx.moveTo(TRACK_LEFT, 0);
-      ctx.lineTo(TRACK_LEFT, COURSE_LEN + 200);
+      ctx.moveTo(TRACK_LEFT, 50);
+      ctx.lineTo(TRACK_LEFT, START_Y + 150);
       ctx.stroke();
 
       ctx.beginPath();
-      ctx.moveTo(TRACK_RIGHT, 0);
-      ctx.lineTo(TRACK_RIGHT, COURSE_LEN + 200);
+      ctx.moveTo(TRACK_RIGHT, 50);
+      ctx.lineTo(TRACK_RIGHT, START_Y + 150);
       ctx.stroke();
       ctx.shadowBlur = 0;
 
-      // Center Dashed Lane Divider
+      // Dashed Center Guideline
       ctx.setLineDash([14, 10]);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
       ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.moveTo(W / 2, 0);
-      ctx.lineTo(W / 2, COURSE_LEN + 200);
+      ctx.moveTo(W / 2, 50);
+      ctx.lineTo(W / 2, START_Y + 150);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Start Line Chequered Mat (Y = 100)
+      // Start Line (Y = START_Y)
       for (let c = 0; c < 10; c++) {
         for (let r = 0; r < 2; r++) {
           ctx.fillStyle = (c + r) % 2 === 0 ? '#ffffff' : '#020617';
-          ctx.fillRect(TRACK_LEFT + c * (TRACK_WIDTH / 10), 90 + r * 10, TRACK_WIDTH / 10, 10);
+          ctx.fillRect(TRACK_LEFT + c * (TRACK_WIDTH / 10), START_Y + 20 + r * 10, TRACK_WIDTH / 10, 10);
         }
       }
       ctx.fillStyle = '#38bdf8';
-      ctx.font = '900 11px "Outfit", sans-serif';
+      ctx.font = '900 12px "Outfit", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('⚡ START LINE ⚡', W / 2, 78);
+      ctx.fillText('⚡ START LINE (RUN UPWARDS) ⚡', W / 2, START_Y + 55);
 
-      // 2. Render Mud Zones
+      // 2. Mud Slime Zones
       for (const m of mudZones) {
-        ctx.fillStyle = 'rgba(88, 28, 135, 0.75)';
+        ctx.fillStyle = 'rgba(88, 28, 135, 0.8)';
         ctx.fillRect(m.x, m.y, m.w, m.h);
         ctx.strokeStyle = '#c084fc';
         ctx.lineWidth = 2;
         ctx.strokeRect(m.x, m.y, m.w, m.h);
 
-        // Toxic Slime bubbles
-        ctx.fillStyle = '#e879f9';
-        for (let b = 0; b < 6; b++) {
-          ctx.beginPath();
-          ctx.arc(m.x + 35 + b * 50, m.y + 45 + Math.sin(b * 2) * 20, 6, 0, Math.PI * 2);
-          ctx.fill();
-        }
         ctx.fillStyle = '#f3e8ff';
-        ctx.font = '900 10px "Outfit", sans-serif';
-        ctx.fillText('⚠️ TOXIC SLIME (JUMP OVER!)', W / 2, m.y + m.h / 2 + 3);
+        ctx.font = '900 11px "Outfit", sans-serif';
+        ctx.fillText('⚠️ TOXIC SLIME (JUMP TO CLEAR!)', W / 2, m.y + m.h / 2 + 4);
       }
 
-      // 3. Render Turbo Arrow Boost Pads
+      // 3. Turbo Boost Arrow Pads (Pointing UPWARDS!)
       for (const tp of turboPads) {
         ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
         ctx.fillRect(tp.x, tp.y, tp.w, tp.h);
@@ -562,34 +544,31 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         ctx.lineWidth = 2.5;
         ctx.strokeRect(tp.x, tp.y, tp.w, tp.h);
 
-        // Glowing Chevron Arrows
+        // Arrow pointing UP towards finish line
         ctx.fillStyle = '#34d399';
         ctx.beginPath();
-        ctx.moveTo(tp.x + tp.w / 2, tp.y + 8);
-        ctx.lineTo(tp.x + tp.w - 14, tp.y + tp.h - 10);
-        ctx.lineTo(tp.x + 14, tp.y + tp.h - 10);
+        ctx.moveTo(tp.x + tp.w / 2, tp.y + 6);
+        ctx.lineTo(tp.x + tp.w - 12, tp.y + tp.h - 8);
+        ctx.lineTo(tp.x + 12, tp.y + tp.h - 8);
         ctx.closePath();
         ctx.fill();
       }
 
-      // 4. Render Sliding Bumpers
+      // 4. Sliding Bumpers
       for (const sb of slidingBumpers) {
-        // Shadow
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.fillRect(sb.x, sb.y + 4, sb.w, sb.h);
 
-        // Bumper body with warning stripes
         ctx.fillStyle = '#e11d48';
         ctx.fillRect(sb.x, sb.y, sb.w, sb.h);
 
-        // Warning diagonal hazard stripes
         ctx.fillStyle = '#fbbf24';
-        for (let s = 0; s < sb.w; s += 24) {
+        for (let s = 0; s < sb.w; s += 22) {
           ctx.beginPath();
           ctx.moveTo(sb.x + s, sb.y);
-          ctx.lineTo(sb.x + s + 12, sb.y);
-          ctx.lineTo(sb.x + s + 6, sb.y + sb.h);
-          ctx.lineTo(sb.x + s - 6, sb.y + sb.h);
+          ctx.lineTo(sb.x + s + 10, sb.y);
+          ctx.lineTo(sb.x + s + 5, sb.y + sb.h);
+          ctx.lineTo(sb.x + s - 5, sb.y + sb.h);
           ctx.closePath();
           ctx.fill();
         }
@@ -599,21 +578,13 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         ctx.strokeRect(sb.x, sb.y, sb.w, sb.h);
       }
 
-      // 5. Render Rotating Spiked Hammers
+      // 5. Rotating Spiked Hammers
       for (const rh of rotatingHammers) {
-        // Center hub shadow
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-        ctx.beginPath();
-        ctx.arc(rh.x, rh.y + 5, 18, 0, Math.PI * 2);
-        ctx.fill();
-
-        // 4 Rotating Arms with Spikes
         for (let a = 0; a < 4; a++) {
           const armAngle = rh.angle + (a * Math.PI) / 2;
           const hx = rh.x + Math.cos(armAngle) * rh.radius * 0.72;
           const hy = rh.y + Math.sin(armAngle) * rh.radius * 0.72;
 
-          // Arm bar
           ctx.strokeStyle = '#475569';
           ctx.lineWidth = 7;
           ctx.beginPath();
@@ -621,7 +592,6 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
           ctx.lineTo(hx, hy);
           ctx.stroke();
 
-          // Spiked Hammer head
           ctx.fillStyle = '#f59e0b';
           ctx.beginPath();
           ctx.arc(hx, hy, 14, 0, Math.PI * 2);
@@ -630,17 +600,8 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 2;
           ctx.stroke();
-
-          // Spike tip
-          const tipX = hx + Math.cos(armAngle) * 10;
-          const tipY = hy + Math.sin(armAngle) * 10;
-          ctx.fillStyle = '#dc2626';
-          ctx.beginPath();
-          ctx.arc(tipX, tipY, 4, 0, Math.PI * 2);
-          ctx.fill();
         }
 
-        // Center hub
         ctx.fillStyle = '#1e293b';
         ctx.beginPath();
         ctx.arc(rh.x, rh.y, 16, 0, Math.PI * 2);
@@ -651,7 +612,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         ctx.stroke();
       }
 
-      // 6. Finish Line Archway (Y = 1880)
+      // 6. Finish Line Archway (Y = FINISH_Y)
       for (let c = 0; c < 12; c++) {
         for (let r = 0; r < 3; r++) {
           ctx.fillStyle = (c + r) % 2 === 0 ? '#ffffff' : '#000000';
@@ -659,7 +620,6 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         }
       }
 
-      // Finish Banner Pillars
       ctx.fillStyle = '#f59e0b';
       ctx.fillRect(TRACK_LEFT - 8, FINISH_Y - 20, 12, 60);
       ctx.fillRect(TRACK_RIGHT - 4, FINISH_Y - 20, 12, 60);
@@ -669,34 +629,26 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       ctx.textAlign = 'center';
       ctx.shadowColor = '#f59e0b';
       ctx.shadowBlur = 16;
-      ctx.fillText('🏁 FINISH LINE 🏁', W / 2, FINISH_Y - 10);
+      ctx.fillText('🏁 FINISH ARCH 🏁', W / 2, FINISH_Y - 10);
       ctx.shadowBlur = 0;
 
-      // 7. Render Both 2.5D Stylized Humanoid Runners
+      // 7. Render Runners
       for (const [uid, runner] of Object.entries(runners.current)) {
         const isMe = uid === playerUid;
         const color = isMe ? '#06b6d4' : '#f43f5e';
         const visorColor = isMe ? '#38bdf8' : '#fb7185';
-        const z = runner.z || 0; // jump height
+        const z = runner.z || 0;
 
         ctx.save();
         ctx.translate(runner.x, runner.y);
 
-        // Ground Drop Shadow (Contracts as runner jumps)
+        // Ground Drop Shadow
         ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
         ctx.beginPath();
-        ctx.ellipse(
-          0,
-          8,
-          Math.max(6, 16 - z * 0.25),
-          Math.max(3, 8 - z * 0.15),
-          0,
-          0,
-          Math.PI * 2
-        );
+        ctx.ellipse(0, 8, Math.max(6, 16 - z * 0.25), Math.max(3, 8 - z * 0.15), 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Stun Stars if stunned
+        // Stun Stars
         if (runner.stunTimer > 0) {
           ctx.fillStyle = '#facc15';
           const animTime = Date.now();
@@ -709,7 +661,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         // Lift runner by z height
         ctx.translate(0, -z);
 
-        // Boost Fire Trail when sprinting
+        // Boost Fire Trail
         if (runner.boostTimer > 0) {
           ctx.fillStyle = 'rgba(16, 185, 129, 0.8)';
           ctx.beginPath();
@@ -717,8 +669,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
           ctx.fill();
         }
 
-        // Athletic Runner Body
-        // Pumping legs animation
+        // Pumping Legs
         const legSwing = Math.sin(runner.animPhase) * 7;
         ctx.fillStyle = '#0f172a';
         ctx.fillRect(-8, 6 + legSwing, 5, 12);
@@ -730,19 +681,18 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         ctx.roundRect(-10, -10, 20, 18, 5);
         ctx.fill();
 
-        // Runner Head
+        // Head & Visor
         ctx.fillStyle = '#1e293b';
         ctx.beginPath();
         ctx.arc(0, -16, 10, 0, Math.PI * 2);
         ctx.fill();
 
-        // Glowing Visor
         ctx.fillStyle = visorColor;
         ctx.beginPath();
         ctx.roundRect(-6, -19, 12, 5, 2);
         ctx.fill();
 
-        // Name / "YOU" Label
+        // Label
         ctx.fillStyle = '#ffffff';
         ctx.font = '900 10px "Outfit", sans-serif';
         ctx.fillText(isMe ? 'YOU' : uid === p1Uid ? p1Nickname.substring(0, 8) : p2Nickname.substring(0, 8), 0, -28);
@@ -750,10 +700,9 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         ctx.restore();
       }
 
-      ctx.restore(); // Exit camera translate
-      ctx.restore(); // Exit scaling
+      ctx.restore();
+      ctx.restore();
 
-      // Particle system overlay
       juice.renderParticles(canvasMgr.ctx, canvasMgr.width / W);
     };
 
@@ -772,9 +721,9 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
   const p1Score = room.scores[p1Uid] || 0;
   const p2Score = room.scores[p2Uid] || 0;
   const myRunner = runners.current[playerUid];
-  const myPct = myRunner ? Math.min(100, Math.round((myRunner.y / FINISH_Y) * 100)) : 0;
+  const myPct = myRunner ? Math.max(0, Math.min(100, Math.round(((START_Y - myRunner.y) / TOTAL_DISTANCE) * 100))) : 0;
   const oppRunner = runners.current[p1Uid === playerUid ? p2Uid : p1Uid];
-  const oppPct = oppRunner ? Math.min(100, Math.round((oppRunner.y / FINISH_Y) * 100)) : 0;
+  const oppPct = oppRunner ? Math.max(0, Math.min(100, Math.round(((START_Y - oppRunner.y) / TOTAL_DISTANCE) * 100))) : 0;
 
   return (
     <div className="w-full max-w-md mx-auto flex flex-col items-center select-none gap-2 px-1">
@@ -814,8 +763,8 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         </div>
       </div>
 
-      {/* Canvas Gauntlet Stage - Fits mobile viewport comfortably */}
-      <div className="w-full h-[52vh] min-h-[340px] max-h-[500px] aspect-[480/640] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 relative bg-[#050914] cursor-pointer">
+      {/* Canvas Gauntlet Stage - Running UPWARDS toward Finish */}
+      <div className="w-full h-[52vh] min-h-[340px] max-h-[500px] aspect-[460/640] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 relative bg-[#050914] cursor-pointer">
         <canvas
           ref={canvasRef}
           style={{ touchAction: 'none' }}
@@ -873,7 +822,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       </div>
 
       <p className="text-[10px] text-slate-400 font-mono text-center">
-        🕹️ Drag left half to steer • Tap JUMP to clear toxic mud & hazards!
+        🕹️ Drag or tap Left/Right to steer • Tap JUMP to leap over slime & hazards!
       </p>
     </div>
   );
