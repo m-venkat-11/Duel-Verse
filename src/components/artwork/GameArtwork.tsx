@@ -7,6 +7,11 @@ interface GameArtworkProps {
 }
 
 const COVER_MAP: Record<string, { image: string; fallbackGradient: string; title: string }> = {
+  luckydice: {
+    image: '/assets/lucky_dice_cover.jpg',
+    fallbackGradient: 'from-amber-500 via-orange-600 to-rose-600',
+    title: 'Lucky Dice Clash'
+  },
   obstaclerush: {
     image: '/assets/obstacle_rush_cover.jpg',
     fallbackGradient: 'from-orange-600 via-amber-500 to-rose-600',

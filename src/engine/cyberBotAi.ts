@@ -389,6 +389,21 @@ export function getCyberBotSpeech(
         { text: 'A bluff! You broke the pattern.', mood: 'surprised' }
       ]
     },
+    luckydice: {
+      turn: [
+        { text: 'Shaking the 3D dice cup... feeling lucky!', mood: 'thinking' },
+        { text: 'Probability matrices running... roll incoming!', mood: 'confident' },
+        { text: 'Will the dice favor carbon or silicon? Let us see!', mood: 'neutral' }
+      ],
+      win_round: [
+        { text: 'JACKPOT! All my dice cleared first!', mood: 'confident' },
+        { text: 'The quantum dice landed directly in my favor!', mood: 'confident' }
+      ],
+      lose_round: [
+        { text: 'Incredible luck! You cleared all your dice!', mood: 'surprised' },
+        { text: 'My roll helped your numbers! What a match!', mood: 'defeated' }
+      ]
+    },
     generic: {
       turn: [
         { text: 'CyberBot neural core active. Your turn.', mood: 'neutral' },

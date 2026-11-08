@@ -14,6 +14,12 @@ import { registerTankKill } from '../../engine/tankDuelEngine';
 import { registerSlapStrike, registerFalseDodge } from '../../engine/slapDuelEngine';
 import { registerKnifeThrow, createKnifeMasterInitialState } from '../../engine/knifeMasterEngine';
 import { registerSumoRingOut } from '../../engine/sumoSpinEngine';
+import {
+  setLuckyDiceCount,
+  submitLuckyDiceGuesses,
+  rollLuckyDice,
+  resetLuckyDiceNextRound
+} from '../../engine/luckyDiceEngine';
 
 function generateRoomCode(): string {
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -765,6 +771,45 @@ export class BroadcastTransport implements IRoomTransport {
                 this.saveAndBroadcast(currentRoom);
               }
             }, 1800);
+          }
+        }
+        break;
+      }
+
+      // --- Lucky Dice Clash ---
+      case 'LUCKY_DICE_SET_COUNT': {
+        const { diceCount } = payload;
+        room.gameState = setLuckyDiceCount(room.gameState, diceCount);
+        break;
+      }
+
+      case 'LUCKY_DICE_SUBMIT_GUESS': {
+        const { guesses } = payload;
+        room.gameState = submitLuckyDiceGuesses(room.gameState, playerUid, guesses, playerUids);
+        break;
+      }
+
+      case 'LUCKY_DICE_ROLL': {
+        const res = rollLuckyDice(room.gameState, playerUid, playerUids);
+        room.gameState = res.newState;
+
+        if (res.roundOver && res.roundWinnerUid) {
+          room.scores[res.roundWinnerUid] = (room.scores[res.roundWinnerUid] || 0) + 1;
+          const targetWins = room.maxRounds || room.gameState?.targetWins || 3;
+          if (res.matchOver || room.scores[res.roundWinnerUid] >= targetWins) {
+            room.status = 'match_end';
+            room.matchWinnerUid = res.matchWinnerUid || res.roundWinnerUid;
+          } else {
+            // Auto advance to next dice round in 2 seconds
+            setTimeout(() => {
+              const currentRoom = this.getStoredRoom(action.roomId);
+              if (currentRoom && currentRoom.status === 'playing') {
+                currentRoom.currentRound += 1;
+                currentRoom.roundWinnerUid = null;
+                currentRoom.gameState = resetLuckyDiceNextRound(currentRoom.gameState, playerUids);
+                this.saveAndBroadcast(currentRoom);
+              }
+            }, 2000);
           }
         }
         break;

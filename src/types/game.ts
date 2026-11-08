@@ -204,3 +204,19 @@ export interface CyberSudokuState {
   canUndo: boolean;
   history: { row: number; col: number; prevValue: number; prevNotes: number[] }[];
 }
+
+// --- 17. Lucky Dice Clash ---
+export interface LuckyDiceState {
+  diceCount: number; // 1 to 5 (default 3)
+  phase: 'setup' | 'guessing' | 'rolling' | 'round_end';
+  currentTurn: string; // active player UID who rolls next
+  guesses: Record<string, number[]>; // playerUid -> array of guessed numbers [n1, n2, n3] (1..6)
+  cleared: Record<string, boolean[]>; // playerUid -> array of cleared booleans [false, true, false]
+  currentRoll: number[]; // rolled values of the dice e.g. [4, 2, 6]
+  roundWinnerUid: string | null;
+  roundScores: Record<string, number>;
+  targetWins: number;
+  rollCount: number;
+  lastRolledBy: string | null;
+  recentMatches?: { uid: string; dieIndex: number; value: number }[];
+}

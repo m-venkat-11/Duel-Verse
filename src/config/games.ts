@@ -17,6 +17,20 @@ export interface GameMetadata {
 
 export const GAMES_CATALOG: GameMetadata[] = [
   {
+    id: 'luckydice',
+    title: 'Lucky Dice Clash',
+    tagline: '3D tumbling dice luck & prediction showdown',
+    category: 'foundational',
+    playersRange: '1v1 • Turn-based',
+    estDurationSec: 60,
+    difficulty: 'Casual',
+    accentColor: '#F59E0B',
+    accentGradient: 'from-amber-400 via-orange-500 to-rose-500',
+    description: 'Select your lucky dice count, predict target numbers (1–6), and take turns spinning 3D tumbling dice! Match your predictions to clear your dice first for jackpot victory!',
+    featured: true,
+    playable: true
+  },
+  {
     id: 'obstaclerush',
     title: 'Obstacle Rush',
     tagline: 'High-speed 60 FPS dual-track gauntlet race',

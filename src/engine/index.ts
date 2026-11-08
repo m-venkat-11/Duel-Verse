@@ -14,6 +14,7 @@ import { createSumoSpinInitialState } from './sumoSpinEngine';
 import { createFlappySpideyInitialState } from './flappySpideyEngine';
 import { createCyber2048InitialState } from './cyber2048Engine';
 import { createCyberSudokuInitialState } from './cyberSudokuEngine';
+import { createLuckyDiceInitialState } from './luckyDiceEngine';
 
 export function initializeGameState(gameId: string, playerUids: string[], targetScore: number = 3): any {
   switch (gameId) {
@@ -49,6 +50,8 @@ export function initializeGameState(gameId: string, playerUids: string[], target
       return createCyber2048InitialState();
     case 'cybersudoku':
       return createCyberSudokuInitialState('casual');
+    case 'luckydice':
+      return createLuckyDiceInitialState(playerUids, targetScore, 3);
     default:
       return createTicTacToeInitialState(playerUids);
   }
@@ -70,4 +73,5 @@ export * from './sumoSpinEngine';
 export * from './flappySpideyEngine';
 export * from './cyber2048Engine';
 export * from './cyberSudokuEngine';
+export * from './luckyDiceEngine';
 

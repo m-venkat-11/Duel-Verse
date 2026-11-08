@@ -35,6 +35,7 @@ import { SumoSpinView } from './components/games/SumoSpinView';
 import { FlappySpideyView } from './components/games/FlappySpideyView';
 import { Cyber2048View } from './components/games/Cyber2048View';
 import { CyberSudokuView } from './components/games/CyberSudokuView';
+import { LuckyDiceView } from './components/games/LuckyDiceView';
 import {
   getCyberBotTicTacToeMove,
   getCyberBotConnectFourMove,
@@ -303,6 +304,20 @@ export function App() {
           return () => clearTimeout(timer);
         }
       }
+    }
+
+    // 7. Lucky Dice Duel (CyberBot Auto-Roll on its turn)
+    if (room.selectedGameId === 'luckydice' && gs.phase === 'rolling' && gs.currentTurn === botUid && !gs.roundWinnerUid) {
+      const timer = setTimeout(() => {
+        activeTransport.dispatchAction({
+          type: 'LUCKY_DICE_ROLL',
+          roomId: room.roomId,
+          playerUid: botUid,
+          payload: { actingUid: botUid },
+          timestamp: Date.now()
+        });
+      }, 750);
+      return () => clearTimeout(timer);
     }
 
     // Note: Real-time physics/reflex games (tankduel, tapfrenzy, obstaclerush, slapduel, knifemaster, sumospin, pong)
@@ -615,6 +630,14 @@ export function App() {
       case 'cybersudoku':
         return (
           <CyberSudokuView
+            room={room}
+            playerUid={profile.uid}
+            onDispatchAction={handleDispatchAction}
+          />
+        );
+      case 'luckydice':
+        return (
+          <LuckyDiceView
             room={room}
             playerUid={profile.uid}
             onDispatchAction={handleDispatchAction}
