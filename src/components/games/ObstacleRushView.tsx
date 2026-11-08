@@ -4,7 +4,7 @@ import { GameLoop } from '../../engine/core/GameLoop';
 import { CanvasManager } from '../../engine/core/CanvasManager';
 import { JuiceEngine } from '../../engine/core/JuiceEngine';
 import { soundService } from '../../services/sound';
-import { Zap, ChevronLeft, ChevronRight, ArrowUp, Trophy, Flag } from 'lucide-react';
+import { Zap, ChevronLeft, ChevronRight, ArrowUp, Trophy, Flag, Sparkles } from 'lucide-react';
 
 interface ObstacleRushViewProps {
   room: AuthoritativeRoomState<any>;
@@ -28,31 +28,33 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
   const raceWinnerRef = useRef<string | null>(null);
   const finishDispatched = useRef<boolean>(false);
 
-  // Jump State
+  // Jump and Dash States
   const [isJumpingState, setIsJumpingState] = useState<boolean>(false);
+  const [dashReady, setDashReady] = useState<boolean>(true);
 
-  // Track Dimensions: W = 460, H = 640
-  // Track extends from Y = 1900 (Start) UPWARDS to Y = 100 (Finish Arch)
+  // Track Dimensions
   const W = 460;
   const H = 640;
-  const TRACK_LEFT = 40;
-  const TRACK_RIGHT = 420;
+  const TRACK_LEFT = 35;
+  const TRACK_RIGHT = 425;
   const TRACK_WIDTH = TRACK_RIGHT - TRACK_LEFT;
 
+  // Track coordinates: Runners start at START_Y = 1750 and run UPWARDS to FINISH_Y = 140
   const START_Y = 1750;
   const FINISH_Y = 140;
   const TOTAL_DISTANCE = START_Y - FINISH_Y;
 
-  // Runners in world coordinates (running UPWARDS towards Y = 140)
+  // Runners state
   const runners = useRef<{
     [uid: string]: {
       x: number;
       y: number;
-      z: number; // Vertical jump height
+      z: number;
       vx: number;
       vy: number;
       jumpTimer: number;
       isJumping: boolean;
+      dashTimer: number;
       stunTimer: number;
       boostTimer: number;
       animPhase: number;
@@ -65,10 +67,12 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
 
   const keysDown = useRef<{ [key: string]: boolean }>({});
   const mobileInput = useRef({ left: false, right: false, up: false, down: false });
-  const touchJoystick = useRef<{ active: boolean; startX: number; currX: number }>({
+  const touchSteer = useRef<{ active: boolean; startX: number; currX: number; startY: number; currY: number }>({
     active: false,
     startX: 0,
-    currX: 0
+    currX: 0,
+    startY: 0,
+    currY: 0
   });
 
   const lastNetworkDispatch = useRef<number>(0);
@@ -84,6 +88,9 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       if (k === ' ' || k === 'arrowup' || k === 'w') {
         triggerJump();
       }
+      if (k === 'shift' || k === 'e') {
+        triggerDash();
+      }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       keysDown.current[e.key.toLowerCase()] = false;
@@ -96,7 +103,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
     };
   }, []);
 
-  // Listen for remote runner position updates in 2P multiplayer
+  // Sync remote runners in 2P multiplayer
   useEffect(() => {
     if (!isBotPlaying && room.gameState?.runners) {
       const oppUid = p1Uid === playerUid ? p2Uid : p1Uid;
@@ -107,11 +114,11 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
     }
   }, [room.gameState?.runners, isBotPlaying, p1Uid, p2Uid, playerUid]);
 
-  // Reset race state on round change
+  // Reset race on round change
   const resetRace = () => {
     runners.current = {
-      [p1Uid]: { x: 160, y: START_Y, z: 0, vx: 0, vy: 0, jumpTimer: 0, isJumping: false, stunTimer: 0, boostTimer: 0, animPhase: 0 },
-      [p2Uid]: { x: 300, y: START_Y, z: 0, vx: 0, vy: 0, jumpTimer: 0, isJumping: false, stunTimer: 0, boostTimer: 0, animPhase: 0 }
+      [p1Uid]: { x: 160, y: START_Y, z: 0, vx: 0, vy: 0, jumpTimer: 0, isJumping: false, dashTimer: 0, stunTimer: 0, boostTimer: 0, animPhase: 0 },
+      [p2Uid]: { x: 300, y: START_Y, z: 0, vx: 0, vy: 0, jumpTimer: 0, isJumping: false, dashTimer: 0, stunTimer: 0, boostTimer: 0, animPhase: 0 }
     };
     finishDispatched.current = false;
     raceWinnerRef.current = null;
@@ -127,10 +134,25 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
     if (!me || me.isJumping || me.stunTimer > 0 || finishDispatched.current) return;
 
     me.isJumping = true;
-    me.jumpTimer = 0.54;
+    me.jumpTimer = 0.55;
     setIsJumpingState(true);
     soundService.playCountdown(1);
-    if (navigator.vibrate) navigator.vibrate(20);
+    if (navigator.vibrate) navigator.vibrate(25);
+  };
+
+  const triggerDash = () => {
+    if (!dashReady || finishDispatched.current) return;
+    const me = runners.current[playerUid];
+    if (!me || me.stunTimer > 0) return;
+
+    setDashReady(false);
+    me.dashTimer = 0.38;
+    soundService.playScore();
+    if (navigator.vibrate) navigator.vibrate(35);
+
+    setTimeout(() => {
+      setDashReady(true);
+    }, 2000);
   };
 
   // Main 60 FPS Game Loop
@@ -139,60 +161,64 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
     if (!canvas) return;
 
     const canvasMgr = new CanvasManager(canvas);
-    const juice = new JuiceEngine(350);
+    const juice = new JuiceEngine(400);
 
-    // Course Hazards Configuration (spaced along Y = 1750 down to Y = 140)
+    // Course Hazards Configuration
     const turboPads = [
-      { x: 140, y: 1520, w: 70, h: 44 },
-      { x: 260, y: 920, w: 70, h: 44 },
-      { x: 195, y: 440, w: 70, h: 44 }
+      { x: 130, y: 1530, w: 75, h: 48 },
+      { x: 265, y: 940, w: 75, h: 48 },
+      { x: 195, y: 450, w: 75, h: 48 }
     ];
 
     const rotatingHammers = [
-      { y: 1360, x: 230, radius: 95, angle: 0, speed: 2.5 },
-      { y: 800, x: 230, radius: 100, angle: Math.PI / 4, speed: -2.7 },
-      { y: 360, x: 230, radius: 95, angle: Math.PI / 2, speed: 2.6 }
+      { y: 1370, x: 230, radius: 105, angle: 0, speed: 2.6 },
+      { y: 810, x: 230, radius: 110, angle: Math.PI / 4, speed: -2.8 },
+      { y: 360, x: 230, radius: 105, angle: Math.PI / 2, speed: 2.7 }
     ];
 
     const mudZones = [
-      { x: 70, y: 1140, w: 320, h: 90 },
-      { x: 70, y: 580, w: 320, h: 90 }
+      { x: 65, y: 1150, w: 330, h: 95 },
+      { x: 65, y: 590, w: 330, h: 95 }
     ];
 
     const slidingBumpers = [
-      { y: 980, w: 140, h: 26, x: 90, minX: 50, maxX: 270, dir: 1, speed: 175 },
-      { y: 460, w: 140, h: 26, x: 230, minX: 50, maxX: 270, dir: -1, speed: 185 }
+      { y: 990, w: 150, h: 28, x: 80, minX: 45, maxX: 265, dir: 1, speed: 180 },
+      { y: 470, w: 150, h: 28, x: 235, minX: 45, maxX: 265, dir: -1, speed: 190 }
     ];
 
-    // Touch dragging anywhere on canvas to steer
+    // Dynamic Touch Dragging on canvas
     const handlePointerDown = (e: PointerEvent) => {
       e.preventDefault();
       try { canvas.setPointerCapture(e.pointerId); } catch {}
       const rect = canvas.getBoundingClientRect();
       const px = ((e.clientX - rect.left) / rect.width) * W;
+      const py = ((e.clientY - rect.top) / rect.height) * H;
 
-      // Tap on bottom-right triggers jump
-      if (px > W * 0.7) {
+      // Bottom-right tap triggers Jump
+      if (px > W * 0.72) {
         triggerJump();
         return;
       }
 
-      touchJoystick.current = {
+      touchSteer.current = {
         active: true,
         startX: px,
-        currX: px
+        currX: px,
+        startY: py,
+        currY: py
       };
     };
 
     const handlePointerMove = (e: PointerEvent) => {
-      if (!touchJoystick.current.active) return;
+      if (!touchSteer.current.active) return;
       e.preventDefault();
       const rect = canvas.getBoundingClientRect();
-      touchJoystick.current.currX = ((e.clientX - rect.left) / rect.width) * W;
+      touchSteer.current.currX = ((e.clientX - rect.left) / rect.width) * W;
+      touchSteer.current.currY = ((e.clientY - rect.top) / rect.height) * H;
     };
 
     const handlePointerUp = () => {
-      touchJoystick.current.active = false;
+      touchSteer.current.active = false;
     };
 
     canvas.addEventListener('pointerdown', handlePointerDown);
@@ -223,7 +249,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       // Update Player Runner Movement
       const me = runners.current[playerUid];
       if (me) {
-        // Handle Jump Arc
+        // Jump Arc Handling
         if (me.isJumping) {
           me.jumpTimer -= dt;
           if (me.jumpTimer <= 0) {
@@ -231,10 +257,10 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
             me.jumpTimer = 0;
             me.z = 0;
             setIsJumpingState(false);
-            juice.emitSparks(me.x, me.y, 6, '#cbd5e1', '#94a3b8', 2);
+            juice.emitSparks(me.x, me.y, 8, '#cbd5e1', '#94a3b8', 2.5);
           } else {
-            const progress = (0.54 - me.jumpTimer) / 0.54;
-            me.z = Math.sin(progress * Math.PI) * 36;
+            const progress = (0.55 - me.jumpTimer) / 0.55;
+            me.z = Math.sin(progress * Math.PI) * 38; // Jumps high in 3D!
           }
         }
 
@@ -246,10 +272,10 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
           // Steering input
           let steerX = 0;
 
-          if (touchJoystick.current.active) {
-            const dx = touchJoystick.current.currX - touchJoystick.current.startX;
+          if (touchSteer.current.active) {
+            const dx = touchSteer.current.currX - touchSteer.current.startX;
             if (Math.abs(dx) > 6) {
-              steerX = Math.max(-1, Math.min(1, dx / 40));
+              steerX = Math.max(-1, Math.min(1, dx / 35));
             }
           }
 
@@ -261,39 +287,43 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
           if (isLeft) steerX = -1;
           if (isRight) steerX = 1;
 
-          // Forward running speed (Running UPWARDS: vy is negative!)
-          let forwardSpeed = 180;
-          if (isUp) forwardSpeed = 230;
-          if (isDown) forwardSpeed = 110;
+          // Forward running speed (UPWARDS into screen: vy is negative!)
+          let forwardSpeed = 185;
+          if (isUp) forwardSpeed = 235;
+          if (isDown) forwardSpeed = 100;
 
+          if (me.dashTimer > 0) {
+            me.dashTimer -= dt;
+            forwardSpeed = 380; // Dash burst!
+          }
           if (me.boostTimer > 0) {
             me.boostTimer -= dt;
-            forwardSpeed = 340; // Turbo boost!
+            forwardSpeed = 350; // Turbo pad!
           }
 
-          // Check Mud Zone slowdown (only if grounded; jumping completely clears mud!)
+          // Check Mud Zone (only slows if grounded; jumping flies OVER mud with zero slowdown!)
           if (!me.isJumping) {
             for (const m of mudZones) {
               if (me.x >= m.x && me.x <= m.x + m.w && me.y >= m.y && me.y <= m.y + m.h) {
-                forwardSpeed *= 0.45;
+                forwardSpeed *= 0.42;
                 break;
               }
             }
           }
 
-          me.vx = steerX * 240;
-          me.vy = -forwardSpeed; // Negative VY = moving UPWARDS towards finish arch!
+          me.vx = steerX * 250;
+          me.vy = -forwardSpeed;
 
           if (forwardSpeed > 0) {
             me.animPhase += dt * 14;
           }
         }
 
-        me.x = Math.max(TRACK_LEFT + 16, Math.min(TRACK_RIGHT - 16, me.x + me.vx * dt));
+        me.x = Math.max(TRACK_LEFT + 18, Math.min(TRACK_RIGHT - 18, me.x + me.vx * dt));
         me.y += me.vy * dt;
 
         // Check Turbo Boost Pads (low altitude)
-        if (me.z < 14) {
+        if (me.z < 15) {
           for (const tp of turboPads) {
             if (
               me.x >= tp.x - 10 &&
@@ -304,15 +334,15 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
               if (me.boostTimer <= 0) {
                 me.boostTimer = 0.95;
                 soundService.playScore();
-                juice.addTrauma(0.15);
-                juice.emitSparks(me.x, me.y, 14, '#10b981', '#34d399', 4);
+                juice.addTrauma(0.18);
+                juice.emitSparks(me.x, me.y, 16, '#10b981', '#34d399', 4.5);
               }
             }
           }
         }
 
-        // Check Rotating Spiked Hammers
-        if (me.z < 24) {
+        // Check Rotating Spiked Sweepers (jumping clears sweeper arm!)
+        if (me.z < 26) {
           for (const rh of rotatingHammers) {
             for (let a = 0; a < 4; a++) {
               const armAngle = rh.angle + (a * Math.PI) / 2;
@@ -320,21 +350,21 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
               const hy = rh.y + Math.sin(armAngle) * rh.radius * 0.72;
               const dist = Math.hypot(me.x - hx, me.y - hy);
 
-              if (dist < 24 && me.stunTimer <= 0) {
+              if (dist < 26 && me.stunTimer <= 0) {
                 me.stunTimer = 0.55;
-                me.vx = Math.cos(armAngle) * 240;
-                me.vy = 180; // Knocks runner BACKWARDS (downward)!
+                me.vx = Math.cos(armAngle) * 250;
+                me.vy = 180; // Knocks runner backwards!
                 soundService.playImpact(1.3);
-                juice.addTrauma(0.4);
-                juice.emitExplosion(me.x, me.y, 22);
+                juice.addTrauma(0.45);
+                juice.emitExplosion(me.x, me.y, 25);
                 break;
               }
             }
           }
         }
 
-        // Check Sliding Bumpers
-        if (me.z < 18) {
+        // Check Sliding Bumpers (jumping clears bumper!)
+        if (me.z < 20) {
           for (const sb of slidingBumpers) {
             if (
               me.x >= sb.x - 12 &&
@@ -344,11 +374,11 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
               me.stunTimer <= 0
             ) {
               me.stunTimer = 0.45;
-              me.vx = sb.dir * 220;
+              me.vx = sb.dir * 230;
               me.vy = 160;
               soundService.playImpact(1.2);
               juice.addTrauma(0.35);
-              juice.emitSparks(me.x, me.y, 12, '#f43f5e', '#fb7185', 3.5);
+              juice.emitSparks(me.x, me.y, 14, '#f43f5e', '#fb7185', 4);
             }
           }
         }
@@ -376,8 +406,8 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
             bot.jumpTimer = 0;
             bot.z = 0;
           } else {
-            const progress = (0.54 - bot.jumpTimer) / 0.54;
-            bot.z = Math.sin(progress * Math.PI) * 36;
+            const progress = (0.55 - bot.jumpTimer) / 0.55;
+            bot.z = Math.sin(progress * Math.PI) * 38;
           }
         }
 
@@ -386,34 +416,34 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
           bot.vx *= 0.88;
           bot.vy *= 0.88;
         } else {
-          let botSpeed = 182; // Human-matched pace
+          let botSpeed = 186; // Competitive human-matched pace
 
           if (bot.boostTimer > 0) {
             bot.boostTimer -= dt;
-            botSpeed = 340;
+            botSpeed = 350;
           }
 
-          // Bot target: seek turbo pads
+          // Bot target: seek upcoming turbo pads
           let targetX = 230;
           const nextPad = turboPads.find((tp) => tp.y < bot.y && tp.y > bot.y - 240);
           if (nextPad) targetX = nextPad.x + nextPad.w / 2;
 
           // Bot jumps over mud
-          const upcomingMud = mudZones.find((m) => bot.y <= m.y + m.h + 30 && bot.y >= m.y);
-          if (upcomingMud && !bot.isJumping && Math.random() < 0.75) {
+          const upcomingMud = mudZones.find((m) => bot.y <= m.y + m.h + 25 && bot.y >= m.y);
+          if (upcomingMud && !bot.isJumping && Math.random() < 0.8) {
             bot.isJumping = true;
-            bot.jumpTimer = 0.54;
+            bot.jumpTimer = 0.55;
           }
 
           // Bot avoids rotating hammers
-          const nearHammer = rotatingHammers.find((rh) => Math.abs(rh.y - bot.y) < 95);
+          const nearHammer = rotatingHammers.find((rh) => Math.abs(rh.y - bot.y) < 100);
           if (nearHammer) {
-            targetX = bot.x > 230 ? TRACK_RIGHT - 30 : TRACK_LEFT + 30;
+            targetX = bot.x > 230 ? TRACK_RIGHT - 35 : TRACK_LEFT + 35;
           }
 
           bot.x += (targetX - bot.x) * 0.1;
-          bot.x = Math.max(TRACK_LEFT + 16, Math.min(TRACK_RIGHT - 16, bot.x));
-          bot.y -= botSpeed * dt; // Moving UPWARDS towards finish arch!
+          bot.x = Math.max(TRACK_LEFT + 18, Math.min(TRACK_RIGHT - 18, bot.x));
+          bot.y -= botSpeed * dt;
           bot.animPhase += dt * 14;
 
           // Check Turbo Pads for Bot
@@ -471,25 +501,44 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
 
       // Camera smoothly tracks player Y position forward (looking UPWARDS ahead)
       const me = runners.current[playerUid] || { x: 230, y: START_Y };
-      // Cam shows track ahead: runner is placed around 70% down the screen
       const camY = Math.max(0, Math.min(START_Y - H + 120, me.y - H * 0.7));
 
       ctx.save();
       ctx.translate(0, -camY);
 
-      // 1. Cyber Race Track Background
-      ctx.fillStyle = '#050914';
+      // 1. Deep Space Neon Arena Backdrop (Like Tank Duel)
+      const floorGrad = ctx.createLinearGradient(0, 0, 0, START_Y + 250);
+      floorGrad.addColorStop(0, '#020617');
+      floorGrad.addColorStop(0.5, '#090d16');
+      floorGrad.addColorStop(1, '#03050a');
+      ctx.fillStyle = floorGrad;
       ctx.fillRect(0, 0, W, START_Y + 250);
 
-      // Asphalt Track Platform
+      // Floating Neon Cyber Grid
+      ctx.strokeStyle = 'rgba(6, 182, 212, 0.08)';
+      ctx.lineWidth = 1;
+      for (let x = 32; x < W; x += 32) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, START_Y + 200);
+        ctx.stroke();
+      }
+      for (let y = 32; y < START_Y + 200; y += 32) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+      }
+
+      // Asphalt Track Platform with Bevel
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(TRACK_LEFT, 50, TRACK_WIDTH, START_Y + 100);
 
-      // Neon Guardrails
+      // Neon Guardrails with Cyber Glow
       ctx.strokeStyle = '#06b6d4';
       ctx.lineWidth = 4;
       ctx.shadowColor = '#06b6d4';
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 12;
       ctx.beginPath();
       ctx.moveTo(TRACK_LEFT, 50);
       ctx.lineTo(TRACK_LEFT, START_Y + 150);
@@ -501,9 +550,9 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       ctx.stroke();
       ctx.shadowBlur = 0;
 
-      // Dashed Center Guideline
-      ctx.setLineDash([14, 10]);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      // Dashed Center Lane Divider
+      ctx.setLineDash([16, 12]);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(W / 2, 50);
@@ -511,7 +560,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Start Line (Y = START_Y)
+      // Start Line Chequered Platform (Y = START_Y)
       for (let c = 0; c < 10; c++) {
         for (let r = 0; r < 2; r++) {
           ctx.fillStyle = (c + r) % 2 === 0 ? '#ffffff' : '#020617';
@@ -521,17 +570,25 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       ctx.fillStyle = '#38bdf8';
       ctx.font = '900 12px "Outfit", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('⚡ START LINE (RUN UPWARDS) ⚡', W / 2, START_Y + 55);
+      ctx.fillText('⚡ START LINE (SPRINT UPWARDS) ⚡', W / 2, START_Y + 55);
 
       // 2. Mud Slime Zones
       for (const m of mudZones) {
-        ctx.fillStyle = 'rgba(88, 28, 135, 0.8)';
-        ctx.fillRect(m.x, m.y, m.w, m.h);
-        ctx.strokeStyle = '#c084fc';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(m.x, m.y, m.w, m.h);
+        // Drop shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.fillRect(m.x, m.y + 4, m.w, m.h);
 
-        ctx.fillStyle = '#f3e8ff';
+        // Toxic purple sludge
+        ctx.fillStyle = 'rgba(112, 26, 117, 0.85)';
+        ctx.beginPath();
+        ctx.roundRect(m.x, m.y, m.w, m.h, 12);
+        ctx.fill();
+
+        ctx.strokeStyle = '#e879f9';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#fae8ff';
         ctx.font = '900 11px "Outfit", sans-serif';
         ctx.fillText('⚠️ TOXIC SLIME (JUMP TO CLEAR!)', W / 2, m.y + m.h / 2 + 4);
       }
@@ -539,72 +596,96 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       // 3. Turbo Boost Arrow Pads (Pointing UPWARDS!)
       for (const tp of turboPads) {
         ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
-        ctx.fillRect(tp.x, tp.y, tp.w, tp.h);
+        ctx.beginPath();
+        ctx.roundRect(tp.x, tp.y, tp.w, tp.h, 8);
+        ctx.fill();
+
         ctx.strokeStyle = '#10b981';
         ctx.lineWidth = 2.5;
-        ctx.strokeRect(tp.x, tp.y, tp.w, tp.h);
+        ctx.stroke();
 
-        // Arrow pointing UP towards finish line
+        // Glowing Chevron Arrows pointing UP
         ctx.fillStyle = '#34d399';
         ctx.beginPath();
-        ctx.moveTo(tp.x + tp.w / 2, tp.y + 6);
-        ctx.lineTo(tp.x + tp.w - 12, tp.y + tp.h - 8);
-        ctx.lineTo(tp.x + 12, tp.y + tp.h - 8);
+        ctx.moveTo(tp.x + tp.w / 2, tp.y + 8);
+        ctx.lineTo(tp.x + tp.w - 14, tp.y + tp.h - 10);
+        ctx.lineTo(tp.x + 14, tp.y + tp.h - 10);
         ctx.closePath();
         ctx.fill();
       }
 
-      // 4. Sliding Bumpers
+      // 4. Sliding Bumpers (Metallic Piston Bars with Bevel)
       for (const sb of slidingBumpers) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.fillRect(sb.x, sb.y + 4, sb.w, sb.h);
+        ctx.beginPath();
+        ctx.roundRect(sb.x, sb.y + 4, sb.w, sb.h, 6);
+        ctx.fill();
 
         ctx.fillStyle = '#e11d48';
-        ctx.fillRect(sb.x, sb.y, sb.w, sb.h);
+        ctx.beginPath();
+        ctx.roundRect(sb.x, sb.y, sb.w, sb.h, 6);
+        ctx.fill();
 
+        // Warning Stripes
         ctx.fillStyle = '#fbbf24';
-        for (let s = 0; s < sb.w; s += 22) {
+        for (let s = 0; s < sb.w; s += 24) {
           ctx.beginPath();
           ctx.moveTo(sb.x + s, sb.y);
-          ctx.lineTo(sb.x + s + 10, sb.y);
-          ctx.lineTo(sb.x + s + 5, sb.y + sb.h);
-          ctx.lineTo(sb.x + s - 5, sb.y + sb.h);
+          ctx.lineTo(sb.x + s + 12, sb.y);
+          ctx.lineTo(sb.x + s + 6, sb.y + sb.h);
+          ctx.lineTo(sb.x + s - 6, sb.y + sb.h);
           ctx.closePath();
           ctx.fill();
         }
 
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.5;
-        ctx.strokeRect(sb.x, sb.y, sb.w, sb.h);
+        ctx.stroke();
       }
 
-      // 5. Rotating Spiked Hammers
+      // 5. Rotating Spiked Sweepers (High-Tech 4-Arm Sweeper)
       for (const rh of rotatingHammers) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        ctx.beginPath();
+        ctx.arc(rh.x, rh.y + 6, 20, 0, Math.PI * 2);
+        ctx.fill();
+
         for (let a = 0; a < 4; a++) {
           const armAngle = rh.angle + (a * Math.PI) / 2;
           const hx = rh.x + Math.cos(armAngle) * rh.radius * 0.72;
           const hy = rh.y + Math.sin(armAngle) * rh.radius * 0.72;
 
+          // Metal arm
           ctx.strokeStyle = '#475569';
-          ctx.lineWidth = 7;
+          ctx.lineWidth = 8;
           ctx.beginPath();
           ctx.moveTo(rh.x, rh.y);
           ctx.lineTo(hx, hy);
           ctx.stroke();
 
+          // Spiked Head
           ctx.fillStyle = '#f59e0b';
           ctx.beginPath();
-          ctx.arc(hx, hy, 14, 0, Math.PI * 2);
+          ctx.arc(hx, hy, 15, 0, Math.PI * 2);
           ctx.fill();
 
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 2;
           ctx.stroke();
+
+          // Neon Spike Tip
+          const tipX = hx + Math.cos(armAngle) * 11;
+          const tipY = hy + Math.sin(armAngle) * 11;
+          ctx.fillStyle = '#dc2626';
+          ctx.beginPath();
+          ctx.arc(tipX, tipY, 4.5, 0, Math.PI * 2);
+          ctx.fill();
         }
 
-        ctx.fillStyle = '#1e293b';
+        // Center Rotating Hub
+        ctx.fillStyle = '#0f172a';
         ctx.beginPath();
-        ctx.arc(rh.x, rh.y, 16, 0, Math.PI * 2);
+        ctx.arc(rh.x, rh.y, 18, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.strokeStyle = '#38bdf8';
@@ -612,7 +693,7 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         ctx.stroke();
       }
 
-      // 6. Finish Line Archway (Y = FINISH_Y)
+      // 6. Finish Archway (Y = FINISH_Y)
       for (let c = 0; c < 12; c++) {
         for (let r = 0; r < 3; r++) {
           ctx.fillStyle = (c + r) % 2 === 0 ? '#ffffff' : '#000000';
@@ -620,82 +701,98 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         }
       }
 
+      // Finish Pillars
       ctx.fillStyle = '#f59e0b';
-      ctx.fillRect(TRACK_LEFT - 8, FINISH_Y - 20, 12, 60);
-      ctx.fillRect(TRACK_RIGHT - 4, FINISH_Y - 20, 12, 60);
+      ctx.fillRect(TRACK_LEFT - 10, FINISH_Y - 25, 14, 65);
+      ctx.fillRect(TRACK_RIGHT - 4, FINISH_Y - 25, 14, 65);
 
       ctx.fillStyle = '#fbbf24';
       ctx.font = '900 16px "Outfit", sans-serif';
       ctx.textAlign = 'center';
       ctx.shadowColor = '#f59e0b';
-      ctx.shadowBlur = 16;
-      ctx.fillText('🏁 FINISH ARCH 🏁', W / 2, FINISH_Y - 10);
+      ctx.shadowBlur = 18;
+      ctx.fillText('🏁 FINISH ARCH 🏁', W / 2, FINISH_Y - 12);
       ctx.shadowBlur = 0;
 
-      // 7. Render Runners
+      // 7. Render Stylized 2.5D Brawler Runners (Like Fall Guys / Stumble Guys!)
       for (const [uid, runner] of Object.entries(runners.current)) {
         const isMe = uid === playerUid;
-        const color = isMe ? '#06b6d4' : '#f43f5e';
-        const visorColor = isMe ? '#38bdf8' : '#fb7185';
+        // Amber Gold for Player 1, Cyber Cyan for Player 2/Bot (Matches Tank Duel!)
+        const mainColor = isMe ? '#f59e0b' : '#06b6d4';
+        const visorColor = isMe ? '#fbbf24' : '#22d3ee';
         const z = runner.z || 0;
 
         ctx.save();
         ctx.translate(runner.x, runner.y);
 
-        // Ground Drop Shadow
+        // Dynamic Ground Drop Shadow (Contracts as runner leaps)
         ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
         ctx.beginPath();
-        ctx.ellipse(0, 8, Math.max(6, 16 - z * 0.25), Math.max(3, 8 - z * 0.15), 0, 0, Math.PI * 2);
+        ctx.ellipse(0, 8, Math.max(6, 18 - z * 0.25), Math.max(3, 9 - z * 0.15), 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Stun Stars
+        // Stun Stars if hit
         if (runner.stunTimer > 0) {
           ctx.fillStyle = '#facc15';
           const animTime = Date.now();
           for (let s = 0; s < 3; s++) {
             const starAngle = animTime * 0.01 + (s * Math.PI * 2) / 3;
-            ctx.fillText('⭐', Math.cos(starAngle) * 18, -30 + Math.sin(starAngle) * 8);
+            ctx.fillText('⭐', Math.cos(starAngle) * 20, -32 + Math.sin(starAngle) * 8);
           }
         }
 
-        // Lift runner by z height
+        // Lift runner by vertical jump height z
         ctx.translate(0, -z);
 
-        // Boost Fire Trail
-        if (runner.boostTimer > 0) {
-          ctx.fillStyle = 'rgba(16, 185, 129, 0.8)';
+        // Turbo Speed Streaks
+        if (runner.boostTimer > 0 || runner.dashTimer > 0) {
+          ctx.fillStyle = 'rgba(16, 185, 129, 0.85)';
           ctx.beginPath();
-          ctx.arc(0, 18, 12, 0, Math.PI * 2);
+          ctx.arc(0, 20, 14, 0, Math.PI * 2);
           ctx.fill();
         }
 
-        // Pumping Legs
-        const legSwing = Math.sin(runner.animPhase) * 7;
+        // Animated Running Feet (Juicy step animation)
+        const footSwing = Math.sin(runner.animPhase) * 8;
         ctx.fillStyle = '#0f172a';
-        ctx.fillRect(-8, 6 + legSwing, 5, 12);
-        ctx.fillRect(3, 6 - legSwing, 5, 12);
-
-        // Torso
-        ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.roundRect(-10, -10, 20, 18, 5);
+        ctx.roundRect(-10, 8 + footSwing, 7, 10, 3);
+        ctx.roundRect(3, 8 - footSwing, 7, 10, 3);
         ctx.fill();
 
-        // Head & Visor
-        ctx.fillStyle = '#1e293b';
+        // 3D Spherical Capsule Brawler Body
+        const bodyGrad = ctx.createRadialGradient(-3, -4, 2, 0, 0, 18);
+        bodyGrad.addColorStop(0, '#ffffff');
+        bodyGrad.addColorStop(0.35, mainColor);
+        bodyGrad.addColorStop(1, isMe ? '#b45309' : '#0e7490');
+        ctx.fillStyle = bodyGrad;
         ctx.beginPath();
-        ctx.arc(0, -16, 10, 0, Math.PI * 2);
+        ctx.roundRect(-14, -14, 28, 26, 12);
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Expressive Cyber Visor
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.roundRect(-9, -10, 18, 9, 4);
         ctx.fill();
 
         ctx.fillStyle = visorColor;
+        ctx.shadowColor = visorColor;
+        ctx.shadowBlur = 6;
         ctx.beginPath();
-        ctx.roundRect(-6, -19, 12, 5, 2);
+        ctx.arc(-3, -6, 2.5, 0, Math.PI * 2);
+        ctx.arc(3, -6, 2.5, 0, Math.PI * 2);
         ctx.fill();
+        ctx.shadowBlur = 0;
 
-        // Label
+        // Player Name Label
         ctx.fillStyle = '#ffffff';
         ctx.font = '900 10px "Outfit", sans-serif';
-        ctx.fillText(isMe ? 'YOU' : uid === p1Uid ? p1Nickname.substring(0, 8) : p2Nickname.substring(0, 8), 0, -28);
+        ctx.fillText(isMe ? 'YOU' : uid === p1Uid ? p1Nickname.substring(0, 8) : p2Nickname.substring(0, 8), 0, -22);
 
         ctx.restore();
       }
@@ -731,40 +828,40 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
       <div className="w-full flex flex-col gap-1.5 px-3 py-2 rounded-2xl bg-slate-900/90 border border-white/10 shadow-md">
         <div className="flex items-center justify-between text-xs font-mono font-bold">
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
-            <span className="text-cyan-300 font-['Outfit'] font-black">{p1Nickname} (YOU)</span>
-            <span className="text-cyan-400 font-black">{myPct}%</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+            <span className="text-amber-300 font-['Outfit'] font-black">{p1Nickname} (YOU)</span>
+            <span className="text-amber-400 font-black">{myPct}%</span>
           </div>
 
           <div className="flex items-center gap-1.5">
-            <span className="text-rose-400 font-black">{oppPct}%</span>
-            <span className="text-rose-300 font-['Outfit'] font-black">{p2Nickname}</span>
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
+            <span className="text-cyan-400 font-black">{oppPct}%</span>
+            <span className="text-cyan-300 font-['Outfit'] font-black">{p2Nickname}</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
           </div>
         </div>
 
         {/* Live Race Distance Progress Bar with Runner Icons */}
         <div className="w-full h-3 rounded-full bg-slate-950 border border-slate-700 relative overflow-hidden flex items-center">
           <div
-            className="absolute top-0 bottom-0 left-0 bg-cyan-500/30 rounded-full transition-all duration-75"
+            className="absolute top-0 bottom-0 left-0 bg-amber-500/30 rounded-full transition-all duration-75"
             style={{ width: `${myPct}%` }}
           />
           {/* My Runner Dot */}
           <div
-            className="absolute w-3.5 h-3.5 rounded-full bg-cyan-400 border border-white shadow-[0_0_8px_#38bdf8] transition-all duration-75 -ml-1.5"
+            className="absolute w-3.5 h-3.5 rounded-full bg-amber-400 border border-white shadow-[0_0_8px_#f59e0b] transition-all duration-75 -ml-1.5"
             style={{ left: `${myPct}%` }}
           />
           {/* Opponent Runner Dot */}
           <div
-            className="absolute w-3.5 h-3.5 rounded-full bg-rose-500 border border-white shadow-[0_0_8px_#f43f5e] transition-all duration-75 -ml-1.5"
+            className="absolute w-3.5 h-3.5 rounded-full bg-cyan-400 border border-white shadow-[0_0_8px_#06b6d4] transition-all duration-75 -ml-1.5"
             style={{ left: `${oppPct}%` }}
           />
           <Flag className="w-3 h-3 text-amber-400 absolute right-1 pointer-events-none" />
         </div>
       </div>
 
-      {/* Canvas Gauntlet Stage - Running UPWARDS toward Finish */}
-      <div className="w-full h-[52vh] min-h-[340px] max-h-[500px] aspect-[460/640] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 relative bg-[#050914] cursor-pointer">
+      {/* Canvas Gauntlet Stage - Running UPWARDS toward Finish Arch */}
+      <div className="w-full h-[52vh] min-h-[340px] max-h-[500px] aspect-[460/640] rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 relative bg-[#020617] cursor-pointer">
         <canvas
           ref={canvasRef}
           style={{ touchAction: 'none' }}
@@ -783,34 +880,35 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
         )}
       </div>
 
-      {/* Mobile Controls: Steering + Prominent JUMP Button */}
-      <div className="w-full grid grid-cols-3 gap-2 max-w-sm pt-0.5">
+      {/* Modern Tactical Controls: Steer + Dash + Jump */}
+      <div className="w-full grid grid-cols-4 gap-2 max-w-sm pt-0.5">
         <button
           onPointerDown={(e) => { e.preventDefault(); mobileInput.current.left = true; }}
           onPointerUp={() => { mobileInput.current.left = false; }}
           onPointerLeave={() => { mobileInput.current.left = false; }}
           onPointerCancel={() => { mobileInput.current.left = false; }}
-          className="h-12 rounded-xl bg-slate-900 border-2 border-cyan-500/40 active:bg-cyan-600/30 active:scale-95 text-xs font-black font-mono text-cyan-300 flex items-center justify-center gap-1 shadow-md touch-manipulation cursor-pointer"
+          className="h-11 rounded-xl bg-slate-900 border-2 border-slate-700 active:bg-cyan-600/30 active:scale-95 text-xs font-black font-mono text-slate-300 flex items-center justify-center gap-1 shadow-md touch-manipulation cursor-pointer"
         >
           <ChevronLeft className="w-4 h-4 text-cyan-400" />
           <span>LEFT</span>
         </button>
 
         <button
-          onPointerDown={(e) => { e.preventDefault(); mobileInput.current.right = true; }}
-          onPointerUp={() => { mobileInput.current.right = false; }}
-          onPointerLeave={() => { mobileInput.current.right = false; }}
-          onPointerCancel={() => { mobileInput.current.right = false; }}
-          className="h-12 rounded-xl bg-slate-900 border-2 border-cyan-500/40 active:bg-cyan-600/30 active:scale-95 text-xs font-black font-mono text-cyan-300 flex items-center justify-center gap-1 shadow-md touch-manipulation cursor-pointer"
+          onClick={triggerDash}
+          disabled={!dashReady}
+          className={`h-11 rounded-xl border text-xs font-black font-mono flex items-center justify-center gap-1 shadow-md active:scale-95 transition touch-manipulation cursor-pointer ${
+            dashReady
+              ? 'bg-emerald-600/30 border-emerald-500/60 text-emerald-300 hover:bg-emerald-600/50'
+              : 'bg-slate-900 border-slate-800 text-slate-500 opacity-50'
+          }`}
         >
-          <span>RIGHT</span>
-          <ChevronRight className="w-4 h-4 text-cyan-400" />
+          <Zap className="w-3.5 h-3.5 text-emerald-400 fill-current" />
+          <span>DASH</span>
         </button>
 
-        {/* Large Prominent JUMP Button (Clears slime mud & low hazards!) */}
         <button
           onClick={triggerJump}
-          className={`h-12 rounded-xl border-2 font-mono font-black text-xs flex items-center justify-center gap-1 shadow-lg active:scale-95 transition touch-manipulation cursor-pointer ${
+          className={`h-11 rounded-xl border-2 font-mono font-black text-xs flex items-center justify-center gap-1 shadow-lg active:scale-95 transition touch-manipulation cursor-pointer ${
             isJumpingState
               ? 'bg-amber-500/30 border-amber-400 text-amber-300'
               : 'bg-gradient-to-r from-amber-600 to-yellow-500 border-amber-400 text-slate-950 font-black'
@@ -819,10 +917,21 @@ export const ObstacleRushView: React.FC<ObstacleRushViewProps> = ({ room, player
           <ArrowUp className="w-4 h-4 stroke-[3]" />
           <span>JUMP</span>
         </button>
+
+        <button
+          onPointerDown={(e) => { e.preventDefault(); mobileInput.current.right = true; }}
+          onPointerUp={() => { mobileInput.current.right = false; }}
+          onPointerLeave={() => { mobileInput.current.right = false; }}
+          onPointerCancel={() => { mobileInput.current.right = false; }}
+          className="h-11 rounded-xl bg-slate-900 border-2 border-slate-700 active:bg-cyan-600/30 active:scale-95 text-xs font-black font-mono text-slate-300 flex items-center justify-center gap-1 shadow-md touch-manipulation cursor-pointer"
+        >
+          <span>RIGHT</span>
+          <ChevronRight className="w-4 h-4 text-cyan-400" />
+        </button>
       </div>
 
       <p className="text-[10px] text-slate-400 font-mono text-center">
-        🕹️ Drag or tap Left/Right to steer • Tap JUMP to leap over slime & hazards!
+        🕹️ Drag or tap to steer • ⬆ JUMP clears mud & spikes • ⚡ DASH for speed burst!
       </p>
     </div>
   );
