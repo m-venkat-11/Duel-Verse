@@ -5,7 +5,7 @@ import { GameLoop } from '../../engine/core/GameLoop';
 import { CanvasManager } from '../../engine/core/CanvasManager';
 import { JuiceEngine } from '../../engine/core/JuiceEngine';
 import { soundService } from '../../services/sound';
-import { Trophy, Dices, Sparkles, RefreshCw, CheckCircle2, Coins, ArrowRight } from 'lucide-react';
+import { Trophy, Dices, RefreshCw, CheckCircle2, Coins } from 'lucide-react';
 
 interface LuckyDiceViewProps {
   room: AuthoritativeRoomState<LuckyDiceState>;
@@ -29,49 +29,72 @@ interface PhysicalCasinoDie {
   vrotY: number;
   vrotZ: number;
   size: number;
-  colorType: 'ruby' | 'sapphire' | 'amber' | 'emerald';
+  colorType: 'ruby' | 'sapphire' | 'amber';
   targetValue: number;
   isSettled: boolean;
   settleTimer: number;
 }
 
-// 3D Rotation Utility
-function rotate3D(
-  x: number,
-  y: number,
-  z: number,
-  rx: number,
-  ry: number,
-  rz: number
-): [number, number, number] {
-  const cosX = Math.cos(rx), sinX = Math.sin(rx);
-  const y1 = y * cosX - z * sinX;
-  const z1 = y * sinX + z * cosX;
+// -------------------------------------------------------------
+// STANDARD 3x3 MATRIX LINEAR ALGEBRA (Zero Shearing, Zero Distortion)
+// -------------------------------------------------------------
+type Mat3 = [
+  number, number, number,
+  number, number, number,
+  number, number, number
+];
 
-  const cosY = Math.cos(ry), sinY = Math.sin(ry);
-  const x2 = x * cosY + z1 * sinY;
-  const z2 = -x * sinY + z1 * cosY;
+function mat3Multiply(a: Mat3, b: Mat3): Mat3 {
+  return [
+    a[0] * b[0] + a[1] * b[3] + a[2] * b[6],
+    a[0] * b[1] + a[1] * b[4] + a[2] * b[7],
+    a[0] * b[2] + a[1] * b[5] + a[2] * b[8],
 
-  const cosZ = Math.cos(rz), sinZ = Math.sin(rz);
-  const x3 = x2 * cosZ - y1 * sinZ;
-  const y3 = x2 * sinZ + y1 * cosZ;
+    a[3] * b[0] + a[4] * b[3] + a[5] * b[6],
+    a[3] * b[1] + a[4] * b[4] + a[5] * b[7],
+    a[3] * b[2] + a[4] * b[5] + a[5] * b[8],
 
-  return [x3, y3, z2];
+    a[6] * b[0] + a[7] * b[3] + a[8] * b[6],
+    a[6] * b[1] + a[7] * b[4] + a[8] * b[7],
+    a[6] * b[2] + a[7] * b[5] + a[8] * b[8]
+  ];
 }
 
-// Fixed Camera Isometric Elevation (looks down at 34° elevation, 45° azimuth)
-// This guarantees that the Top Face, Front-Left Face, and Front-Right Face are ALWAYS simultaneously visible!
-const CAM_PITCH = 0.58;
-const CAM_YAW = 0.78;
+function mat3FromEuler(rx: number, ry: number, rz: number): Mat3 {
+  const cx = Math.cos(rx), sx = Math.sin(rx);
+  const cy = Math.cos(ry), sy = Math.sin(ry);
+  const cz = Math.cos(rz), sz = Math.sin(rz);
 
-// Local Euler rotations to orient each face value (1 to 6) squarely on top facing camera
-const TARGET_FACE_EULER: Record<number, [number, number, number]> = {
-  1: [-Math.PI / 2, 0, 0],                // +Z faces top
-  6: [Math.PI / 2, 0, 0],                 // -Z faces top
-  2: [0, 0, 0],                           // +Y faces top
-  5: [Math.PI, 0, 0],                     // -Y faces top
-  3: [0, 0, Math.PI / 2],                 // +X faces top
-  4: [0, 0, -Math.PI / 2]                 // -X faces top
+  // R = Rz * Ry * Rx
+  return [
+    cy * cz, sx * sy * cz - cx * sz, cx * sy * cz + sx * sz,
+    cy * sz, sx * sy * sz + cx * cz, cx * sy * sz - sx * cz,
+    -sy,     sx * cy,                cx * cy
+  ];
+}
+
+function mat3Transform(m: Mat3, x: number, y: number, z: number): [number, number, number] {
+  return [
+    m[0] * x + m[1] * y + m[2] * z,
+    m[3] * x + m[4] * y + m[5] * z,
+    m[6] * x + m[7] * y + m[8] * z
+  ];
+}
+
+// Fixed Isometric Camera Angles (35° elevation, 45° azimuth)
+// Always shows Top Face, Front-Left Face, and Front-Right Face in perfect 3D depth!
+const CAM_PITCH = 0.62;
+const CAM_YAW = 0.785;
+const CAM_MATRIX = mat3FromEuler(CAM_PITCH, CAM_YAW, 0);
+
+// Local Euler rotations to place face `N` (1 to 6) squarely on top pointing toward player
+const FACE_ALIGNMENTS: Record<number, [number, number, number]> = {
+  1: [0, 0, 0],                  // Face 1 (+Y is Top)
+  6: [Math.PI, 0, 0],            // Face 6 (-Y is Top)
+  2: [-Math.PI / 2, 0, 0],       // Face 2 (+Z is Top)
+  5: [Math.PI / 2, 0, 0],        // Face 5 (-Z is Top)
+  3: [0, 0, Math.PI / 2],        // Face 3 (+X is Top)
+  4: [0, 0, -Math.PI / 2]        // Face 4 (-X is Top)
 };
 
 export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, onDispatchAction }) => {
@@ -98,21 +121,21 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
   const lastRollAnnouncement = useRef<string | null>(null);
 
   const W = 460;
-  const H = 390;
+  const H = 380;
   const TABLE_LEFT = 40;
   const TABLE_RIGHT = 420;
   const TABLE_TOP = 40;
-  const TABLE_BOTTOM = 350;
+  const TABLE_BOTTOM = 340;
 
-  // Initialize 3D Casino Dice
+  // Initialize 3D Casino Dice (Spaced evenly across table)
   const initDice = (count: number, values: number[]) => {
-    const colors: Array<'ruby' | 'sapphire' | 'amber' | 'emerald'> = ['ruby', 'sapphire', 'amber', 'emerald'];
+    const colors: Array<'ruby' | 'sapphire' | 'amber'> = ['ruby', 'sapphire', 'amber'];
     const newList: PhysicalCasinoDie[] = [];
     const spacing = (TABLE_RIGHT - TABLE_LEFT) / (count + 1);
 
     for (let i = 0; i < count; i++) {
       const val = values[i] || Math.floor(Math.random() * 6) + 1;
-      const angles = TARGET_FACE_EULER[val] || [0, 0, 0];
+      const angles = FACE_ALIGNMENTS[val] || [0, 0, 0];
 
       newList.push({
         id: i,
@@ -128,7 +151,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         vrotX: 0,
         vrotY: 0,
         vrotZ: 0,
-        size: count <= 3 ? 56 : 48,
+        size: count <= 3 ? 52 : 44,
         colorType: colors[i % colors.length],
         targetValue: val,
         isSettled: true,
@@ -144,7 +167,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
     }
   }, [diceCount]);
 
-  // Launch explosive 3D Craps Toss against the diamond rubber bumpers
+  // Launch explosive 3D Craps Toss against the diamond rubber back wall
   const trigger3DCrapsToss = (targetRoll: number[]) => {
     isRollingRef.current = true;
     soundService.playCountdown(1);
@@ -152,21 +175,21 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
     diceRef.current.forEach((die, idx) => {
       die.targetValue = targetRoll[idx] || Math.floor(Math.random() * 6) + 1;
       die.isSettled = false;
-      die.settleTimer = 1.05 + idx * 0.16;
+      die.settleTimer = 1.0 + idx * 0.16;
 
-      // Physical shoot trajectory towards the back wall
-      die.vz = 450 + Math.random() * 150;
-      die.vx = (Math.random() - 0.5) * 380;
-      die.vy = -190 + (Math.random() - 0.5) * 200;
+      // Vertical launch & shoot forward toward back wall
+      die.vz = 420 + Math.random() * 140;
+      die.vx = (Math.random() - 0.5) * 360;
+      die.vy = -180 + (Math.random() - 0.5) * 180;
 
       // Wild 3D angular spin
-      die.vrotX = (Math.random() - 0.5) * 26;
-      die.vrotY = (Math.random() - 0.5) * 26;
-      die.vrotZ = (Math.random() - 0.5) * 26;
+      die.vrotX = (Math.random() - 0.5) * 24;
+      die.vrotY = (Math.random() - 0.5) * 24;
+      die.vrotZ = (Math.random() - 0.5) * 24;
     });
   };
 
-  // Listen to roll updates from authoritative state
+  // Listen to roll updates from authoritative room state
   const prevRollCount = useRef<number>(gameState?.rollCount || 0);
   useEffect(() => {
     if (gameState?.rollCount && gameState.rollCount > prevRollCount.current) {
@@ -179,7 +202,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
     }
   }, [gameState?.rollCount, gameState?.currentRoll, gameState?.lastRolledBy, playerUid, p2Nickname]);
 
-  // Automated CyberBot roll trigger (Guarantees bot ALWAYS takes turn without getting stuck!)
+  // Automated CyberBot roll trigger (Guarantees bot ALWAYS takes turn without stalling!)
   useEffect(() => {
     if (
       gameState?.phase === 'rolling' &&
@@ -202,7 +225,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
     }
   }, [gameState?.roundWinnerUid]);
 
-  // 60 FPS GameLoop for 3D Physics & Isometric Rendering
+  // 60 FPS GameLoop for 3D Physics & Matrix-Projected Isometric Rendering
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -233,8 +256,8 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
           die.rotZ += die.vrotZ * clampedDt;
 
           // Sparks while airborne
-          if (die.z > 25 && Math.random() < 0.35) {
-            juice.emitSparks(die.x, die.y - die.z * 0.3, 2, '#fbbf24', '#ffffff', 1.8);
+          if (die.z > 25 && Math.random() < 0.3) {
+            juice.emitSparks(die.x, die.y - die.z * 0.4, 2, '#fbbf24', '#ffffff', 1.8);
           }
 
           // Table Floor Collision (z <= 0)
@@ -254,7 +277,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
               juice.emitSparks(die.x, die.y, 6, '#f59e0b', '#ffffff', 2.2);
             } else {
               // Settling: Smooth magnetic snap to target face orientation
-              const targetEuler = TARGET_FACE_EULER[die.targetValue] || [0, 0, 0];
+              const targetEuler = FACE_ALIGNMENTS[die.targetValue] || [0, 0, 0];
               die.rotX += (targetEuler[0] - die.rotX) * Math.min(1, 16 * clampedDt);
               die.rotY += (targetEuler[1] - die.rotY) * Math.min(1, 16 * clampedDt);
               die.rotZ += (targetEuler[2] - die.rotZ) * Math.min(1, 16 * clampedDt);
@@ -263,7 +286,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
               die.vy *= 0.55;
               die.vz = 0;
 
-              if (Math.abs(die.vx) < 6 && Math.abs(die.vy) < 6) {
+              if (Math.abs(die.vx) < 5 && Math.abs(die.vy) < 5) {
                 die.isSettled = true;
                 die.rotX = targetEuler[0];
                 die.rotY = targetEuler[1];
@@ -292,7 +315,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
 
           if (die.y - half <= TABLE_TOP) {
             die.y = TABLE_TOP + half;
-            die.vy = Math.abs(die.vy) * 0.82; // Strong bounce off back wall pyramids!
+            die.vy = Math.abs(die.vy) * 0.82;
             soundService.playImpact(0.8);
             juice.emitSparks(die.x, die.y, 8, '#f59e0b', '#ef4444', 2.5);
           } else if (die.y + half >= TABLE_BOTTOM) {
@@ -337,7 +360,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       ctx.lineWidth = 2.5;
       ctx.strokeRect(TABLE_LEFT - 10, TABLE_TOP - 12, TABLE_RIGHT - TABLE_LEFT + 20, TABLE_BOTTOM - TABLE_TOP + 24);
 
-      // Real Craps Diamond Rubber Pyramid Bumpers on Back Wall
+      // Craps Diamond Rubber Pyramid Bumpers on Back Wall
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(TABLE_LEFT - 8, TABLE_TOP - 12, TABLE_RIGHT - TABLE_LEFT + 16, 12);
 
@@ -355,19 +378,19 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       // Craps Table Markings (Gold Silkscreen Lines)
       ctx.strokeStyle = 'rgba(245, 158, 11, 0.16)';
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(TABLE_LEFT + 16, TABLE_TOP + 20, TABLE_RIGHT - TABLE_LEFT - 32, TABLE_BOTTOM - TABLE_TOP - 40);
+      ctx.strokeRect(TABLE_LEFT + 16, TABLE_TOP + 18, TABLE_RIGHT - TABLE_LEFT - 32, TABLE_BOTTOM - TABLE_TOP - 36);
 
       ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
       ctx.font = '900 12px "Outfit", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('★ DUELVERSE HIGH ROLLER CRAPS ★', W / 2, TABLE_TOP + 40);
+      ctx.fillText('★ DUELVERSE HIGH ROLLER CRAPS ★', W / 2, TABLE_TOP + 36);
 
       // Center Dice Ring
       ctx.beginPath();
-      ctx.arc(W / 2, (TABLE_TOP + TABLE_BOTTOM) / 2 + 10, 60, 0, Math.PI * 2);
+      ctx.arc(W / 2, (TABLE_TOP + TABLE_BOTTOM) / 2 + 10, 65, 0, Math.PI * 2);
       ctx.stroke();
 
-      // 2. Render TRUE 3D Isometric Acrylic Casino Dice
+      // 2. Render TRUE 3D Isometric Acrylic Casino Dice (Zero Distortion Matrix)
       const sortedDice = [...diceRef.current].sort((a, b) => a.y - b.y);
 
       sortedDice.forEach((die) => {
@@ -392,52 +415,53 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         ctx.fill();
         ctx.restore();
 
-        // B. 3D Isometric Cube Projection (Rotated into Camera Elevation & Azimuth)
-        const rawVerts = [
-          [-s, -s, -s],
-          [s, -s, -s],
-          [s, s, -s],
-          [-s, s, -s],
-          [-s, -s, s],
-          [s, -s, s],
-          [s, s, s],
-          [-s, s, s]
+        // B. Matrix-Based True 3D Isometric Projection
+        // Combined transformation matrix: totalMat = CAM_MATRIX * dieMatrix
+        const dieMat = mat3FromEuler(die.rotX, die.rotY, die.rotZ);
+        const totalMat = mat3Multiply(CAM_MATRIX, dieMat);
+
+        // 8 Local Cube Vertices
+        const localVerts = [
+          [-s, s, -s],  // 0: top-front-left
+          [s, s, -s],   // 1: top-front-right
+          [s, s, s],    // 2: top-back-right
+          [-s, s, s],   // 3: top-back-left
+          [-s, -s, -s], // 4: bot-front-left
+          [s, -s, -s],  // 5: bot-front-right
+          [s, -s, s],   // 6: bot-back-right
+          [-s, -s, s]   // 7: bot-back-left
         ];
 
-        // 1) Rotate by die physics rotation in world
-        const worldVerts = rawVerts.map((v) => rotate3D(v[0], v[1], v[2], die.rotX, die.rotY, die.rotZ));
+        // Transform vertices to camera view space
+        const projVerts = localVerts.map((v) => {
+          const [cx, cy, cz] = mat3Transform(totalMat, v[0], v[1], v[2]);
+          return {
+            x: die.x + cx,
+            y: die.y - zAlt * 0.65 + cy,
+            z: cz
+          };
+        });
 
-        // 2) Rotate by camera isometric view angles (CAM_PITCH, CAM_YAW)
-        const camVerts = worldVerts.map((v) => rotate3D(v[0], v[1], v[2], CAM_PITCH, CAM_YAW, 0));
-
-        // 3) Screen projection
-        const projVerts = camVerts.map((v) => ({
-          x: die.x + v[0],
-          y: die.y - zAlt * 0.7 + v[1],
-          z: v[2]
-        }));
-
-        // 6 Cube Faces (Opposite sum = 7)
+        // 6 Cube Faces (Local normals)
         const faces = [
-          { value: 1, indices: [4, 5, 6, 7], normal: [0, 0, 1] }, // Front (+Z)
-          { value: 6, indices: [1, 0, 3, 2], normal: [0, 0, -1] }, // Back (-Z)
-          { value: 3, indices: [5, 1, 2, 6], normal: [1, 0, 0] }, // Right (+X)
-          { value: 4, indices: [0, 4, 7, 3], normal: [-1, 0, 0] }, // Left (-X)
-          { value: 2, indices: [0, 1, 5, 4], normal: [0, 1, 0] }, // Top (+Y)
-          { value: 5, indices: [7, 6, 2, 3], normal: [0, -1, 0] } // Bottom (-Y)
+          { value: 1, indices: [0, 1, 2, 3], normal: [0, 1, 0] },   // Top (+Y)
+          { value: 6, indices: [7, 6, 5, 4], normal: [0, -1, 0] },  // Bottom (-Y)
+          { value: 2, indices: [4, 5, 1, 0], normal: [0, 0, -1] },  // Front (-Z)
+          { value: 5, indices: [3, 2, 6, 7], normal: [0, 0, 1] },   // Back (+Z)
+          { value: 3, indices: [1, 5, 6, 2], normal: [1, 0, 0] },   // Right (+X)
+          { value: 4, indices: [4, 0, 3, 7], normal: [-1, 0, 0] }   // Left (-X)
         ];
 
-        // Back-face culling in camera view space
+        // Transform normals to camera view space & cull back faces
         const visibleFaces = faces
           .map((f) => {
-            const worldNorm = rotate3D(f.normal[0], f.normal[1], f.normal[2], die.rotX, die.rotY, die.rotZ);
-            const camNorm = rotate3D(worldNorm[0], worldNorm[1], worldNorm[2], CAM_PITCH, CAM_YAW, 0);
-            const avgZ = f.indices.reduce((sum, idx) => sum + projVerts[idx].z, 0) / 4;
+            const [nx, ny, nz] = mat3Transform(totalMat, f.normal[0], f.normal[1], f.normal[2]);
+            const avgZ = (projVerts[f.indices[0]].z + projVerts[f.indices[1]].z + projVerts[f.indices[2]].z + projVerts[f.indices[3]].z) / 4;
             return {
               ...f,
-              camNorm,
+              camNorm: [nx, ny, nz],
               avgZ,
-              isVisible: camNorm[2] > 0 // Facing camera!
+              isVisible: nz > 0.05 // facing camera
             };
           })
           .filter((f) => f.isVisible)
@@ -453,13 +477,12 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
           // Directional Lighting
           const lightDir = [-0.3, -0.6, 0.7];
           const dot = f.camNorm[0] * lightDir[0] + f.camNorm[1] * lightDir[1] + f.camNorm[2] * lightDir[2];
-          const brightness = Math.max(0.45, Math.min(1.0, 0.7 + dot * 0.45));
+          const brightness = Math.max(0.45, Math.min(1.0, 0.72 + dot * 0.45));
 
           // Jewel Acrylic Colors
           let faceHex = '#dc2626'; // Vegas Ruby Red
           if (die.colorType === 'sapphire') faceHex = '#2563eb';
           else if (die.colorType === 'amber') faceHex = '#d97706';
-          else if (die.colorType === 'emerald') faceHex = '#059669';
 
           ctx.save();
           ctx.beginPath();
@@ -474,13 +497,13 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
           ctx.fill();
 
           // Beveled Silver Edge Rim
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
           ctx.lineWidth = 1.6;
           ctx.stroke();
 
           // Specular Glare on Top Face
-          if (f.camNorm[1] < -0.4) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+          if (f.camNorm[1] < -0.35) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
             ctx.fill();
           }
           ctx.restore();
@@ -566,7 +589,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
     const die = diceRef.current[dieIndex];
     if (die) {
       die.targetValue = nextBet;
-      const targetAngle = TARGET_FACE_EULER[nextBet] || [0, 0, 0];
+      const targetAngle = FACE_ALIGNMENTS[nextBet] || [0, 0, 0];
       die.rotX = targetAngle[0];
       die.rotY = targetAngle[1];
       die.rotZ = targetAngle[2];
@@ -582,7 +605,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       const die = diceRef.current[i];
       if (die) {
         die.targetValue = rand;
-        const targetAngle = TARGET_FACE_EULER[rand] || [0, 0, 0];
+        const targetAngle = FACE_ALIGNMENTS[rand] || [0, 0, 0];
         die.rotX = targetAngle[0];
         die.rotY = targetAngle[1];
         die.rotZ = targetAngle[2];
@@ -675,7 +698,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       </div>
 
       {/* 4. Spacious 3D Vegas Craps Table Canvas (Permanent 60 FPS) */}
-      <div className="w-full h-[40vh] min-h-[280px] max-h-[380px] aspect-[460/390] rounded-3xl overflow-hidden shadow-2xl border-4 border-amber-900/60 relative bg-[#01120b]">
+      <div className="w-full h-[38vh] min-h-[260px] max-h-[360px] aspect-[460/380] rounded-3xl overflow-hidden shadow-2xl border-4 border-amber-900/60 relative bg-[#01120b]">
         <canvas ref={canvasRef} className="w-full h-full block select-none" />
 
         {/* Live Roll Callout Banner on Table */}
@@ -727,7 +750,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       </div>
 
       {/* 6. Giant Tactile Arcade Spin / Roll Button */}
-      <div className="w-full pt-1">
+      <div className="w-full pt-0.5">
         {isMyTurn ? (
           <button
             onClick={handleRollDice}
