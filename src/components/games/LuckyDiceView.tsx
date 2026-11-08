@@ -13,63 +13,78 @@ interface LuckyDiceViewProps {
   onDispatchAction: (type: string, payload: any) => void;
 }
 
-// 3D Physical Casino Die Object
+// -------------------------------------------------------------
+// PHYSICAL 3D CASINO DIE OBJECT
+// -------------------------------------------------------------
 interface PhysicalCasinoDie {
   id: number;
   x: number;
   y: number;
-  z: number; // Vertical altitude above felt table
-  vx: number;
-  vy: number;
-  vz: number;
+  z: number; // Vertical height above green felt table (0 = resting on felt)
+
+  // Designated landing pedestal coordinates
+  homeX: number;
+  homeY: number;
+
+  // Cinematic toss trajectory & timing
+  isSettled: boolean;
+  tossTime: number; // 0.0 to 1.0
+  tossDuration: number;
+  startX: number;
+  startY: number;
+  wallX: number;
+  wallY: number;
+
+  // 3D Euler rotation angles
   rotX: number;
   rotY: number;
   rotZ: number;
+
+  // Angular tumbling velocities during flight
   vrotX: number;
   vrotY: number;
   vrotZ: number;
+
   size: number;
-  colorType: 'ruby' | 'sapphire' | 'amber';
+  colorType: 'ruby' | 'sapphire' | 'amber' | 'emerald' | 'amethyst';
   targetValue: number;
-  isSettled: boolean;
-  settleTimer: number;
+
+  // Event triggers during flight
+  wallHitTriggered: boolean;
+  bounce1Triggered: boolean;
+  bounce2Triggered: boolean;
 }
 
 // -------------------------------------------------------------
-// STANDARD 3x3 MATRIX LINEAR ALGEBRA (Zero Shearing, Zero Distortion)
+// STANDARD 3D ISOMETRIC PROJECTION & ROTATION LINEAR ALGEBRA
 // -------------------------------------------------------------
+const CAM_PITCH = Math.asin(Math.tan(Math.PI / 6)); // ~35.264° true isometric elevation
+const COS45 = Math.SQRT1_2;
+const SIN45 = Math.SQRT1_2;
+const SIN_PITCH = Math.sin(CAM_PITCH);
+const COS_PITCH = Math.cos(CAM_PITCH);
+
+function projectIso(x: number, y: number, z: number): { sx: number; sy: number; sz: number } {
+  const sx = (x - y) * COS45;
+  const sy = (x + y) * SIN45 * SIN_PITCH - z * COS_PITCH;
+  const sz = (x + y) * SIN45 * COS_PITCH + z * SIN_PITCH;
+  return { sx, sy, sz };
+}
+
 type Mat3 = [
   number, number, number,
   number, number, number,
   number, number, number
 ];
 
-function mat3Multiply(a: Mat3, b: Mat3): Mat3 {
-  return [
-    a[0] * b[0] + a[1] * b[3] + a[2] * b[6],
-    a[0] * b[1] + a[1] * b[4] + a[2] * b[7],
-    a[0] * b[2] + a[1] * b[5] + a[2] * b[8],
-
-    a[3] * b[0] + a[4] * b[3] + a[5] * b[6],
-    a[3] * b[1] + a[4] * b[4] + a[5] * b[7],
-    a[3] * b[2] + a[4] * b[5] + a[5] * b[8],
-
-    a[6] * b[0] + a[7] * b[3] + a[8] * b[6],
-    a[6] * b[1] + a[7] * b[4] + a[8] * b[7],
-    a[6] * b[2] + a[7] * b[5] + a[8] * b[8]
-  ];
-}
-
 function mat3FromEuler(rx: number, ry: number, rz: number): Mat3 {
   const cx = Math.cos(rx), sx = Math.sin(rx);
   const cy = Math.cos(ry), sy = Math.sin(ry);
   const cz = Math.cos(rz), sz = Math.sin(rz);
-
-  // R = Rz * Ry * Rx
   return [
-    cy * cz, sx * sy * cz - cx * sz, cx * sy * cz + sx * sz,
-    cy * sz, sx * sy * sz + cx * cz, cx * sy * sz - sx * cz,
-    -sy,     sx * cy,                cx * cy
+    cy * cz, -cy * sz, sy,
+    sx * sy * cz + cx * sz, -sx * sy * sz + cx * cz, -sx * cy,
+    -cx * sy * cz + sx * sz, cx * sy * sz + sx * cz, cx * cy
   ];
 }
 
@@ -81,21 +96,36 @@ function mat3Transform(m: Mat3, x: number, y: number, z: number): [number, numbe
   ];
 }
 
-// Fixed Isometric Camera Angles (35° elevation, 45° azimuth)
-// Always shows Top Face, Front-Left Face, and Front-Right Face in perfect 3D depth!
-const CAM_PITCH = 0.62;
-const CAM_YAW = 0.785;
-const CAM_MATRIX = mat3FromEuler(CAM_PITCH, CAM_YAW, 0);
-
-// Local Euler rotations to place face `N` (1 to 6) squarely on top pointing toward player
+// Local Euler rotations guaranteed to place face value `N` squarely on top facing camera!
 const FACE_ALIGNMENTS: Record<number, [number, number, number]> = {
-  1: [0, 0, 0],                  // Face 1 (+Y is Top)
-  6: [Math.PI, 0, 0],            // Face 6 (-Y is Top)
-  2: [-Math.PI / 2, 0, 0],       // Face 2 (+Z is Top)
-  5: [Math.PI / 2, 0, 0],        // Face 5 (-Z is Top)
-  3: [0, 0, Math.PI / 2],        // Face 3 (+X is Top)
-  4: [0, 0, -Math.PI / 2]        // Face 4 (-X is Top)
+  1: [0, 0, 0],
+  6: [Math.PI, 0, 0],
+  2: [Math.PI / 2, 0, 0],
+  5: [-Math.PI / 2, 0, 0],
+  3: [0, -Math.PI / 2, 0],
+  4: [0, Math.PI / 2, 0]
 };
+
+function adjustBrightness(hex: string, factor: number): string {
+  const num = parseInt(hex.replace('#', ''), 16);
+  const r = Math.min(255, Math.max(0, Math.round(((num >> 16) & 0xff) * factor)));
+  const g = Math.min(255, Math.max(0, Math.round(((num >> 8) & 0xff) * factor)));
+  const b = Math.min(255, Math.max(0, Math.round((num & 0xff) * factor)));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+function getPipCoords(val: number): Array<[number, number]> {
+  if (val === 1) return [[0, 0]];
+  if (val === 2) return [[-0.5, -0.5], [0.5, 0.5]];
+  if (val === 3) return [[-0.5, -0.5], [0, 0], [0.5, 0.5]];
+  if (val === 4) return [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]];
+  if (val === 5) return [[-0.5, -0.5], [0.5, -0.5], [0, 0], [-0.5, 0.5], [0.5, 0.5]];
+  return [
+    [-0.5, -0.55], [0.5, -0.55],
+    [-0.5, 0],     [0.5, 0],
+    [-0.5, 0.55],  [0.5, 0.55]
+  ];
+}
 
 export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, onDispatchAction }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -122,40 +152,84 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
 
   const W = 460;
   const H = 380;
-  const TABLE_LEFT = 40;
-  const TABLE_RIGHT = 420;
-  const TABLE_TOP = 40;
-  const TABLE_BOTTOM = 340;
+  const TABLE_LEFT = 36;
+  const TABLE_RIGHT = 424;
+  const TABLE_TOP = 38;
+  const TABLE_BOTTOM = 342;
 
-  // Initialize 3D Casino Dice (Spaced evenly across table)
+  // Calculate clean, symmetrical landing pedestals aligned horizontally with the player's prediction chips
+  const getHomePositions = (count: number): Array<{ x: number; y: number }> => {
+    if (count === 1) return [{ x: 230, y: 195 }];
+    if (count === 2) return [{ x: 165, y: 195 }, { x: 295, y: 195 }];
+    if (count === 3) {
+      // Symmetrical 3-slot Craps row: Slot 1 (Left), Slot 2 (Center), Slot 3 (Right)
+      return [
+        { x: 120, y: 195 },
+        { x: 230, y: 195 },
+        { x: 340, y: 195 }
+      ];
+    }
+    if (count === 4) {
+      return [
+        { x: 95, y: 195 },
+        { x: 185, y: 195 },
+        { x: 275, y: 195 },
+        { x: 365, y: 195 }
+      ];
+    }
+    // 5 dice
+    return [
+      { x: 75, y: 195 },
+      { x: 152, y: 195 },
+      { x: 230, y: 195 },
+      { x: 308, y: 195 },
+      { x: 385, y: 195 }
+    ];
+  };
+
+  // Initialize 3D Casino Dice (Seated squarely in designated pedestals)
   const initDice = (count: number, values: number[]) => {
-    const colors: Array<'ruby' | 'sapphire' | 'amber'> = ['ruby', 'sapphire', 'amber'];
+    const colors: Array<'ruby' | 'sapphire' | 'amber' | 'emerald' | 'amethyst'> = [
+      'ruby',
+      'sapphire',
+      'amber',
+      'emerald',
+      'amethyst'
+    ];
+    const homes = getHomePositions(count);
     const newList: PhysicalCasinoDie[] = [];
-    const spacing = (TABLE_RIGHT - TABLE_LEFT) / (count + 1);
 
     for (let i = 0; i < count; i++) {
       const val = values[i] || Math.floor(Math.random() * 6) + 1;
       const angles = FACE_ALIGNMENTS[val] || [0, 0, 0];
+      const home = homes[i] || { x: 230, y: 195 };
 
       newList.push({
         id: i,
-        x: TABLE_LEFT + spacing * (i + 1),
-        y: (TABLE_TOP + TABLE_BOTTOM) / 2 + 10,
+        x: home.x,
+        y: home.y,
         z: 0,
-        vx: 0,
-        vy: 0,
-        vz: 0,
+        homeX: home.x,
+        homeY: home.y,
+        isSettled: true,
+        tossTime: 1.0,
+        tossDuration: 1.0,
+        startX: home.x,
+        startY: TABLE_BOTTOM - 15,
+        wallX: home.x,
+        wallY: TABLE_TOP + 12,
         rotX: angles[0],
         rotY: angles[1],
         rotZ: angles[2],
         vrotX: 0,
         vrotY: 0,
         vrotZ: 0,
-        size: count <= 3 ? 52 : 44,
+        size: count <= 3 ? 54 : 46,
         colorType: colors[i % colors.length],
         targetValue: val,
-        isSettled: true,
-        settleTimer: 0
+        wallHitTriggered: true,
+        bounce1Triggered: true,
+        bounce2Triggered: true
       });
     }
     diceRef.current = newList;
@@ -167,25 +241,43 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
     }
   }, [diceCount]);
 
-  // Launch explosive 3D Craps Toss against the diamond rubber back wall
+  // Launch explosive, cinematic 3D Craps Toss: Launches from player toward back wall, rebounds with sparks, and settles squarely into home pedestals!
   const trigger3DCrapsToss = (targetRoll: number[]) => {
     isRollingRef.current = true;
     soundService.playCountdown(1);
 
+    const homes = getHomePositions(diceCount);
+
     diceRef.current.forEach((die, idx) => {
       die.targetValue = targetRoll[idx] || Math.floor(Math.random() * 6) + 1;
       die.isSettled = false;
-      die.settleTimer = 1.0 + idx * 0.16;
+      die.homeX = homes[idx]?.x || die.x;
+      die.homeY = homes[idx]?.y || die.y;
 
-      // Vertical launch & shoot forward toward back wall
-      die.vz = 420 + Math.random() * 140;
-      die.vx = (Math.random() - 0.5) * 360;
-      die.vy = -180 + (Math.random() - 0.5) * 180;
+      // Staggered duration creates thrilling sequential landing
+      die.tossDuration = 1.05 + idx * 0.14;
+      die.tossTime = 0.0;
 
-      // Wild 3D angular spin
-      die.vrotX = (Math.random() - 0.5) * 24;
-      die.vrotY = (Math.random() - 0.5) * 24;
-      die.vrotZ = (Math.random() - 0.5) * 24;
+      // Start toss spread across the bottom of table (shooter's hands)
+      die.startX = W / 2 + (idx - (diceCount - 1) / 2) * 50;
+      die.startY = TABLE_BOTTOM - 15;
+      die.x = die.startX;
+      die.y = die.startY;
+      die.z = 0;
+
+      // Wall hit coordinates along back rubber pyramid bumper
+      const wallSpread = (TABLE_RIGHT - TABLE_LEFT - 80) / (diceCount + 1);
+      die.wallX = TABLE_LEFT + 40 + wallSpread * (idx + 1) + (Math.random() - 0.5) * 16;
+      die.wallY = TABLE_TOP + 12;
+
+      // Wild 3D angular tumbling in the air
+      die.vrotX = (Math.random() > 0.5 ? 1 : -1) * (18 + Math.random() * 10);
+      die.vrotY = (Math.random() > 0.5 ? 1 : -1) * (18 + Math.random() * 10);
+      die.vrotZ = (Math.random() > 0.5 ? 1 : -1) * (18 + Math.random() * 10);
+
+      die.wallHitTriggered = false;
+      die.bounce1Triggered = false;
+      die.bounce2Triggered = false;
     });
   };
 
@@ -213,7 +305,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
     ) {
       const timer = setTimeout(() => {
         onDispatchActionRef.current('LUCKY_DICE_ROLL', { actingUid: p2Uid });
-      }, 850);
+      }, 900);
       return () => clearTimeout(timer);
     }
   }, [gameState?.phase, gameState?.currentTurn, p2Uid, isBotPlaying, gameState?.roundWinnerUid]);
@@ -242,86 +334,90 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       diceRef.current.forEach((die) => {
         if (!die.isSettled) {
           allSettled = false;
-          die.settleTimer -= clampedDt;
+          die.tossTime += clampedDt / die.tossDuration;
 
-          // 3D Gravity & Velocity
-          die.vz -= 1200 * clampedDt;
-          die.x += die.vx * clampedDt;
-          die.y += die.vy * clampedDt;
-          die.z += die.vz * clampedDt;
+          const t = die.tossTime;
 
-          // Spin
-          die.rotX += die.vrotX * clampedDt;
-          die.rotY += die.vrotY * clampedDt;
-          die.rotZ += die.vrotZ * clampedDt;
+          if (t < 0.42) {
+            // PHASE 1: Launch upward from player toward back rubber wall
+            const p = t / 0.42;
+            const cx = (die.startX + die.wallX) / 2 + Math.sin(p * Math.PI) * 14;
+            const cy = Math.min(die.startY, die.wallY) - 26;
 
-          // Sparks while airborne
-          if (die.z > 25 && Math.random() < 0.3) {
-            juice.emitSparks(die.x, die.y - die.z * 0.4, 2, '#fbbf24', '#ffffff', 1.8);
-          }
+            die.x = (1 - p) * (1 - p) * die.startX + 2 * (1 - p) * p * cx + p * p * die.wallX;
+            die.y = (1 - p) * (1 - p) * die.startY + 2 * (1 - p) * p * cy + p * p * die.wallY;
+            die.z = Math.sin(p * Math.PI) * 125;
 
-          // Table Floor Collision (z <= 0)
-          if (die.z <= 0) {
-            die.z = 0;
-            if (die.settleTimer > 0) {
-              // Elastic bounce on felt
-              die.vz = -die.vz * 0.52;
-              die.vx *= 0.82;
-              die.vy *= 0.82;
-              die.vrotX *= 0.72;
-              die.vrotY *= 0.72;
-              die.vrotZ *= 0.72;
+            // Fast 3D spin
+            die.rotX += die.vrotX * clampedDt;
+            die.rotY += die.vrotY * clampedDt;
+            die.rotZ += die.vrotZ * clampedDt;
 
+            // Golden flight spark trail
+            if (Math.random() < 0.4) {
+              juice.emitSparks(die.x, die.y - die.z * 0.45, 2, '#fbbf24', '#ffffff', 1.8);
+            }
+          } else {
+            // BACK WALL RUBBER PYRAMID BUMPER IMPACT!
+            if (!die.wallHitTriggered) {
+              die.wallHitTriggered = true;
               soundService.playImpact(0.85);
               juice.addTrauma(0.12);
-              juice.emitSparks(die.x, die.y, 6, '#f59e0b', '#ffffff', 2.2);
-            } else {
-              // Settling: Smooth magnetic snap to target face orientation
-              const targetEuler = FACE_ALIGNMENTS[die.targetValue] || [0, 0, 0];
-              die.rotX += (targetEuler[0] - die.rotX) * Math.min(1, 16 * clampedDt);
-              die.rotY += (targetEuler[1] - die.rotY) * Math.min(1, 16 * clampedDt);
-              die.rotZ += (targetEuler[2] - die.rotZ) * Math.min(1, 16 * clampedDt);
-
-              die.vx *= 0.55;
-              die.vy *= 0.55;
-              die.vz = 0;
-
-              if (Math.abs(die.vx) < 5 && Math.abs(die.vy) < 5) {
-                die.isSettled = true;
-                die.rotX = targetEuler[0];
-                die.rotY = targetEuler[1];
-                die.rotZ = targetEuler[2];
-                die.vx = 0;
-                die.vy = 0;
-
-                soundService.playScore();
-                juice.addTrauma(0.18);
-                juice.emitExplosion(die.x, die.y, 16);
-              }
+              juice.emitSparks(die.wallX, die.wallY, 12, '#ef4444', '#fbbf24', 2.8);
+              die.vrotY *= -0.7; // Rebound reverse spin
             }
-          }
 
-          // Diamond Rubber Craps Wall Collisions (Rebound!)
-          const half = die.size / 2;
-          if (die.x - half <= TABLE_LEFT) {
-            die.x = TABLE_LEFT + half;
-            die.vx = Math.abs(die.vx) * 0.78;
-            soundService.playImpact(0.7);
-          } else if (die.x + half >= TABLE_RIGHT) {
-            die.x = TABLE_RIGHT - half;
-            die.vx = -Math.abs(die.vx) * 0.78;
-            soundService.playImpact(0.7);
-          }
+            if (t < 1.0) {
+              // PHASE 2: Rebound off wall and roll into designated home pedestal!
+              const p = (t - 0.42) / 0.58; // 0.0 to 1.0
+              const ease = 1 - Math.pow(1 - p, 2.6); // Smooth cubic ease-out to pedestal
 
-          if (die.y - half <= TABLE_TOP) {
-            die.y = TABLE_TOP + half;
-            die.vy = Math.abs(die.vy) * 0.82;
-            soundService.playImpact(0.8);
-            juice.emitSparks(die.x, die.y, 8, '#f59e0b', '#ef4444', 2.5);
-          } else if (die.y + half >= TABLE_BOTTOM) {
-            die.y = TABLE_BOTTOM - half;
-            die.vy = -Math.abs(die.vy) * 0.78;
-            soundService.playImpact(0.7);
+              die.x = die.wallX + (die.homeX - die.wallX) * ease;
+              die.y = die.wallY + (die.homeY - die.wallY) * ease;
+
+              // Felt bounces (2 diminishing half-sine bounces)
+              const bouncePhase = p * Math.PI * 3;
+              const bounceDecay = Math.max(0, 1 - p);
+              die.z = Math.max(0, Math.sin(bouncePhase) * 42 * bounceDecay * bounceDecay);
+
+              // Sound & sparks on felt bounces
+              if (p >= 0.33 && !die.bounce1Triggered) {
+                die.bounce1Triggered = true;
+                soundService.playImpact(0.65);
+                juice.emitSparks(die.x, die.y, 5, '#f59e0b', '#ffffff', 1.6);
+              }
+              if (p >= 0.66 && !die.bounce2Triggered) {
+                die.bounce2Triggered = true;
+                soundService.playImpact(0.5);
+                juice.emitSparks(die.x, die.y, 4, '#f59e0b', '#ffffff', 1.3);
+              }
+
+              // Smoothly orient to target face as it settles into pedestal
+              const targetEuler = FACE_ALIGNMENTS[die.targetValue] || [0, 0, 0];
+              if (p > 0.45) {
+                die.rotX += (targetEuler[0] - die.rotX) * Math.min(1, 14 * clampedDt);
+                die.rotY += (targetEuler[1] - die.rotY) * Math.min(1, 14 * clampedDt);
+                die.rotZ += (targetEuler[2] - die.rotZ) * Math.min(1, 14 * clampedDt);
+              } else {
+                die.rotX += die.vrotX * clampedDt * (1 - p);
+                die.rotY += die.vrotY * clampedDt * (1 - p);
+                die.rotZ += die.vrotZ * clampedDt * (1 - p);
+              }
+            } else {
+              // PHASE 3: PERFECT PEDESTAL LANDING!
+              die.isSettled = true;
+              die.x = die.homeX;
+              die.y = die.homeY;
+              die.z = 0;
+              const targetEuler = FACE_ALIGNMENTS[die.targetValue] || [0, 0, 0];
+              die.rotX = targetEuler[0];
+              die.rotY = targetEuler[1];
+              die.rotZ = targetEuler[2];
+
+              soundService.playScore();
+              juice.addTrauma(0.14);
+              juice.emitExplosion(die.homeX, die.homeY, 14);
+            }
           }
         }
       });
@@ -342,7 +438,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       ctx.scale(scaleX, scaleY);
 
       // 1. Luxury Vegas VIP Casino Felt Table
-      const feltGrad = ctx.createRadialGradient(W / 2, H / 2, 40, W / 2, H / 2, 260);
+      const feltGrad = ctx.createRadialGradient(W / 2, H / 2, 40, W / 2, H / 2, 270);
       feltGrad.addColorStop(0, '#043b27');
       feltGrad.addColorStop(0.65, '#022417');
       feltGrad.addColorStop(1, '#01120b');
@@ -360,7 +456,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       ctx.lineWidth = 2.5;
       ctx.strokeRect(TABLE_LEFT - 10, TABLE_TOP - 12, TABLE_RIGHT - TABLE_LEFT + 20, TABLE_BOTTOM - TABLE_TOP + 24);
 
-      // Craps Diamond Rubber Pyramid Bumpers on Back Wall
+      // Real Craps Diamond Rubber Pyramid Bumpers on Back Wall
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(TABLE_LEFT - 8, TABLE_TOP - 12, TABLE_RIGHT - TABLE_LEFT + 16, 12);
 
@@ -380,17 +476,61 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       ctx.lineWidth = 1.5;
       ctx.strokeRect(TABLE_LEFT + 16, TABLE_TOP + 18, TABLE_RIGHT - TABLE_LEFT - 32, TABLE_BOTTOM - TABLE_TOP - 36);
 
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.22)';
       ctx.font = '900 12px "Outfit", sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('★ DUELVERSE HIGH ROLLER CRAPS ★', W / 2, TABLE_TOP + 36);
 
-      // Center Dice Ring
-      ctx.beginPath();
-      ctx.arc(W / 2, (TABLE_TOP + TABLE_BOTTOM) / 2 + 10, 65, 0, Math.PI * 2);
-      ctx.stroke();
+      // Dedicated Symmetrical Felt Landing Pedestals (Golden Rings on Table)
+      const homes = getHomePositions(diceCount);
+      const myTargets = gameState?.guesses?.[playerUid] || [];
+      const oppTargets = gameState?.guesses?.[p2Uid] || [];
 
-      // 2. Render TRUE 3D Isometric Acrylic Casino Dice (Zero Distortion Matrix)
+      homes.forEach((home, idx) => {
+        ctx.save();
+        const die = diceRef.current[idx];
+        const isMatchedPlayer = die?.isSettled && myTargets[idx] === die.targetValue;
+        const isMatchedBot = die?.isSettled && oppTargets[idx] === die.targetValue;
+
+        // Glow ring if matched
+        if (isMatchedPlayer) {
+          ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(home.x, home.y + 12, 36, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (isMatchedBot) {
+          ctx.strokeStyle = 'rgba(6, 182, 212, 0.6)';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(home.x, home.y + 12, 36, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle = 'rgba(245, 158, 11, 0.25)';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.arc(home.x, home.y + 12, 34, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        ctx.fillStyle = isMatchedPlayer
+          ? '#10b981'
+          : isMatchedBot
+          ? '#06b6d4'
+          : 'rgba(245, 158, 11, 0.25)';
+        ctx.font = '800 10px "Outfit", sans-serif';
+        ctx.fillText(
+          isMatchedPlayer ? '★ MATCH! ★' : isMatchedBot ? 'BOT MATCH' : `SLOT #${idx + 1}`,
+          home.x,
+          home.y + 38
+        );
+        ctx.restore();
+      });
+
+      // 2. Render TRUE 3D Isometric Acrylic Casino Dice
+      // Sort dice by screen depth (Y) so foreground dice render cleanly in front of background dice
       const sortedDice = [...diceRef.current].sort((a, b) => a.y - b.y);
 
       sortedDice.forEach((die) => {
@@ -399,15 +539,15 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
 
         // A. Dynamic Ground Shadow on Felt
         ctx.save();
-        const shadowScale = Math.max(0.4, 1 - zAlt / 350);
-        const shadowAlpha = Math.max(0.12, 0.58 * shadowScale);
+        const shadowScale = Math.max(0.35, 1 - zAlt / 280);
+        const shadowAlpha = Math.max(0.12, 0.62 * shadowScale);
         ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
         ctx.beginPath();
         ctx.ellipse(
           die.x,
-          die.y + 16 + zAlt * 0.08,
+          die.y + 14 + zAlt * 0.05,
           die.size * 0.72 * shadowScale,
-          die.size * 0.38 * shadowScale,
+          die.size * 0.36 * shadowScale,
           0,
           0,
           Math.PI * 2
@@ -415,154 +555,181 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         ctx.fill();
         ctx.restore();
 
-        // B. Matrix-Based True 3D Isometric Projection
-        // Combined transformation matrix: totalMat = CAM_MATRIX * dieMatrix
-        const dieMat = mat3FromEuler(die.rotX, die.rotY, die.rotZ);
-        const totalMat = mat3Multiply(CAM_MATRIX, dieMat);
+        // B. 3D Isometric Faces
+        const mat = mat3FromEuler(die.rotX, die.rotY, die.rotZ);
 
-        // 8 Local Cube Vertices
-        const localVerts = [
-          [-s, s, -s],  // 0: top-front-left
-          [s, s, -s],   // 1: top-front-right
-          [s, s, s],    // 2: top-back-right
-          [-s, s, s],   // 3: top-back-left
-          [-s, -s, -s], // 4: bot-front-left
-          [s, -s, -s],  // 5: bot-front-right
-          [s, -s, s],   // 6: bot-back-right
-          [-s, -s, s]   // 7: bot-back-left
+        // 6 Cube Faces (Local 3D vertices, normals, and pip axes)
+        const cubeFaces = [
+          {
+            val: 1,
+            norm: [0, 0, 1],
+            u: [1, 0, 0],
+            v: [0, 1, 0],
+            verts: [[-s, -s, s], [s, -s, s], [s, s, s], [-s, s, s]]
+          },
+          {
+            val: 6,
+            norm: [0, 0, -1],
+            u: [-1, 0, 0],
+            v: [0, 1, 0],
+            verts: [[s, -s, -s], [-s, -s, -s], [-s, s, -s], [s, s, -s]]
+          },
+          {
+            val: 2,
+            norm: [0, 1, 0],
+            u: [1, 0, 0],
+            v: [0, 0, -1],
+            verts: [[-s, s, s], [s, s, s], [s, s, -s], [-s, s, -s]]
+          },
+          {
+            val: 5,
+            norm: [0, -1, 0],
+            u: [-1, 0, 0],
+            v: [0, 0, -1],
+            verts: [[s, -s, s], [-s, -s, s], [-s, -s, -s], [s, -s, -s]]
+          },
+          {
+            val: 3,
+            norm: [1, 0, 0],
+            u: [0, 1, 0],
+            v: [0, 0, -1],
+            verts: [[s, -s, s], [s, s, s], [s, s, -s], [s, -s, -s]]
+          },
+          {
+            val: 4,
+            norm: [-1, 0, 0],
+            u: [0, -1, 0],
+            v: [0, 0, -1],
+            verts: [[-s, s, s], [-s, -s, s], [-s, -s, -s], [-s, s, -s]]
+          }
         ];
 
-        // Transform vertices to camera view space
-        const projVerts = localVerts.map((v) => {
-          const [cx, cy, cz] = mat3Transform(totalMat, v[0], v[1], v[2]);
-          return {
-            x: die.x + cx,
-            y: die.y - zAlt * 0.65 + cy,
-            z: cz
-          };
-        });
-
-        // 6 Cube Faces (Local normals)
-        const faces = [
-          { value: 1, indices: [0, 1, 2, 3], normal: [0, 1, 0] },   // Top (+Y)
-          { value: 6, indices: [7, 6, 5, 4], normal: [0, -1, 0] },  // Bottom (-Y)
-          { value: 2, indices: [4, 5, 1, 0], normal: [0, 0, -1] },  // Front (-Z)
-          { value: 5, indices: [3, 2, 6, 7], normal: [0, 0, 1] },   // Back (+Z)
-          { value: 3, indices: [1, 5, 6, 2], normal: [1, 0, 0] },   // Right (+X)
-          { value: 4, indices: [4, 0, 3, 7], normal: [-1, 0, 0] }   // Left (-X)
-        ];
-
-        // Transform normals to camera view space & cull back faces
-        const visibleFaces = faces
+        // Transform faces and filter visible (camera facing)
+        const visibleFaces = cubeFaces
           .map((f) => {
-            const [nx, ny, nz] = mat3Transform(totalMat, f.normal[0], f.normal[1], f.normal[2]);
-            const avgZ = (projVerts[f.indices[0]].z + projVerts[f.indices[1]].z + projVerts[f.indices[2]].z + projVerts[f.indices[3]].z) / 4;
+            const wn = mat3Transform(mat, f.norm[0], f.norm[1], f.norm[2]);
+            const cn = projectIso(wn[0], wn[1], wn[2]);
+
+            // Transform 4 vertices
+            const screenVerts = f.verts.map((v) => {
+              const rotV = mat3Transform(mat, v[0], v[1], v[2]);
+              const projV = projectIso(rotV[0], rotV[1], rotV[2]);
+              return {
+                x: die.x + projV.sx,
+                y: die.y - zAlt + projV.sy,
+                z: projV.sz
+              };
+            });
+
+            const avgZ = (screenVerts[0].z + screenVerts[1].z + screenVerts[2].z + screenVerts[3].z) / 4;
+
             return {
               ...f,
-              camNorm: [nx, ny, nz],
+              worldNorm: wn,
+              camNorm: cn,
+              screenVerts,
               avgZ,
-              isVisible: nz > 0.05 // facing camera
+              isVisible: cn.sz > 0.05
             };
           })
           .filter((f) => f.isVisible)
           .sort((a, b) => a.avgZ - b.avgZ);
 
-        // Render each visible 3D face with rich specular shading
+        // Render each visible 3D acrylic face with authentic casino lighting
         visibleFaces.forEach((f) => {
-          const v0 = projVerts[f.indices[0]];
-          const v1 = projVerts[f.indices[1]];
-          const v2 = projVerts[f.indices[2]];
-          const v3 = projVerts[f.indices[3]];
+          const v = f.screenVerts;
 
-          // Directional Lighting
-          const lightDir = [-0.3, -0.6, 0.7];
-          const dot = f.camNorm[0] * lightDir[0] + f.camNorm[1] * lightDir[1] + f.camNorm[2] * lightDir[2];
-          const brightness = Math.max(0.45, Math.min(1.0, 0.72 + dot * 0.45));
+          // Directional lighting from top-left chandelier
+          const lightDir = [-0.25, -0.45, 0.85];
+          const dot = f.worldNorm[0] * lightDir[0] + f.worldNorm[1] * lightDir[1] + f.worldNorm[2] * lightDir[2];
+          const shade = Math.max(0.48, Math.min(1.0, 0.74 + dot * 0.38));
 
-          // Jewel Acrylic Colors
-          let faceHex = '#dc2626'; // Vegas Ruby Red
-          if (die.colorType === 'sapphire') faceHex = '#2563eb';
-          else if (die.colorType === 'amber') faceHex = '#d97706';
+          // Base acrylic gemstone color
+          let baseHex = '#e11d48'; // High Roller Ruby
+          if (die.colorType === 'sapphire') baseHex = '#2563eb';
+          else if (die.colorType === 'amber') baseHex = '#d97706';
+          else if (die.colorType === 'emerald') baseHex = '#059669';
+          else if (die.colorType === 'amethyst') baseHex = '#9333ea';
 
           ctx.save();
           ctx.beginPath();
-          ctx.moveTo(v0.x, v0.y);
-          ctx.lineTo(v1.x, v1.y);
-          ctx.lineTo(v2.x, v2.y);
-          ctx.lineTo(v3.x, v3.y);
+          ctx.moveTo(v[0].x, v[0].y);
+          ctx.lineTo(v[1].x, v[1].y);
+          ctx.lineTo(v[2].x, v[2].y);
+          ctx.lineTo(v[3].x, v[3].y);
           ctx.closePath();
 
-          ctx.fillStyle = faceHex;
-          ctx.globalAlpha = brightness;
+          // Acrylic gradient
+          const faceGrad = ctx.createLinearGradient(v[0].x, v[0].y, v[2].x, v[2].y);
+          faceGrad.addColorStop(0, adjustBrightness(baseHex, shade * 1.18));
+          faceGrad.addColorStop(1, adjustBrightness(baseHex, shade * 0.85));
+          ctx.fillStyle = faceGrad;
           ctx.fill();
 
-          // Beveled Silver Edge Rim
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
-          ctx.lineWidth = 1.6;
+          // Bevelled specular silver rim
+          ctx.strokeStyle = `rgba(255, 255, 255, ${0.48 * shade})`;
+          ctx.lineWidth = 1.8;
+          ctx.lineJoin = 'round';
           ctx.stroke();
 
-          // Specular Glare on Top Face
-          if (f.camNorm[1] < -0.35) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+          // Specular Glare on top-facing surfaces
+          if (f.worldNorm[2] > 0.5) {
+            const glareGrad = ctx.createLinearGradient(v[0].x, v[0].y, v[1].x, v[3].y);
+            glareGrad.addColorStop(0, 'rgba(255, 255, 255, 0.28)');
+            glareGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.08)');
+            glareGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = glareGrad;
             ctx.fill();
           }
           ctx.restore();
 
-          // Inset White Casino Pips (Drawn in 3D perspective!)
-          const center = {
-            x: (v0.x + v1.x + v2.x + v3.x) / 4,
-            y: (v0.y + v1.y + v2.y + v3.y) / 4
-          };
-          const vecU = {
-            x: (v1.x - v0.x + (v2.x - v3.x)) / 4,
-            y: (v1.y - v0.y + (v2.y - v3.y)) / 4
-          };
-          const vecV = {
-            x: (v3.x - v0.x + (v2.x - v1.x)) / 4,
-            y: (v3.y - v0.y + (v2.y - v1.y)) / 4
-          };
+          // Inset Porcelain White & Gold Casino Pips
+          const pips = getPipCoords(f.val);
+          pips.forEach(([pu, pv]) => {
+            const px = f.u[0] * (pu * s * 0.55) + f.v[0] * (pv * s * 0.55) + f.norm[0] * s * 1.02;
+            const py = f.u[1] * (pu * s * 0.55) + f.v[1] * (pv * s * 0.55) + f.norm[1] * s * 1.02;
+            const pz = f.u[2] * (pu * s * 0.55) + f.v[2] * (pv * s * 0.55) + f.norm[2] * s * 1.02;
 
-          const pipPositions: Array<[number, number]> = [];
-          const val = f.value;
+            const rotP = mat3Transform(mat, px, py, pz);
+            const projP = projectIso(rotP[0], rotP[1], rotP[2]);
 
-          if (val === 1) pipPositions.push([0, 0]);
-          else if (val === 2) pipPositions.push([-0.5, -0.5], [0.5, 0.5]);
-          else if (val === 3) pipPositions.push([-0.5, -0.5], [0, 0], [0.5, 0.5]);
-          else if (val === 4) pipPositions.push([-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]);
-          else if (val === 5) pipPositions.push([-0.5, -0.5], [0.5, -0.5], [0, 0], [-0.5, 0.5], [0.5, 0.5]);
-          else if (val === 6)
-            pipPositions.push(
-              [-0.55, -0.55],
-              [0.55, -0.55],
-              [-0.55, 0],
-              [0.55, 0],
-              [-0.55, 0.55],
-              [0.55, 0.55]
-            );
+            const pipX = die.x + projP.sx;
+            const pipY = die.y - zAlt + projP.sy;
+            const pipR = Math.max(2.4, (s / 7.2) * shade);
 
-          ctx.save();
-          pipPositions.forEach(([pu, pv]) => {
-            const px = center.x + vecU.x * pu * 1.45 + vecV.x * pv * 1.45;
-            const py = center.y + vecU.y * pu * 1.45 + vecV.y * pv * 1.45;
-            const pipR = Math.max(2.2, (die.size / 13) * brightness);
-
+            ctx.save();
+            // Dark inset shadow ring
             ctx.beginPath();
-            ctx.arc(px, py, pipR, 0, Math.PI * 2);
-            ctx.fillStyle = val === 1 && die.colorType === 'ruby' ? '#fbbf24' : '#ffffff';
+            ctx.arc(pipX, pipY, pipR + 0.6, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
             ctx.fill();
 
-            ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
-            ctx.lineWidth = 0.8;
-            ctx.stroke();
+            // Pip body
+            ctx.beginPath();
+            ctx.arc(pipX, pipY, pipR, 0, Math.PI * 2);
+            if (f.val === 1 && die.colorType === 'ruby') {
+              ctx.fillStyle = '#fbbf24'; // Vegas Golden Ace pip!
+            } else {
+              ctx.fillStyle = '#ffffff';
+            }
+            ctx.fill();
+
+            // Specular pip highlight
+            ctx.beginPath();
+            ctx.arc(pipX - pipR * 0.3, pipY - pipR * 0.3, pipR * 0.35, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+            ctx.fill();
+            ctx.restore();
           });
-          ctx.restore();
         });
 
-        // Die ID Badge label
-        ctx.fillStyle = '#fbbf24';
-        ctx.font = '900 11px "Outfit", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(`DIE #${die.id + 1}`, die.x, die.y + die.size * 0.65 + 16);
+        // Die ID Badge label under settled die
+        if (die.isSettled) {
+          ctx.fillStyle = '#fbbf24';
+          ctx.font = '900 11px "Outfit", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(`DIE #${die.id + 1}`, die.x, die.y + 26);
+        }
       });
 
       ctx.restore();
@@ -713,7 +880,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       <div className="w-full bg-slate-950/90 border-2 border-amber-500/30 rounded-2xl p-2.5 flex items-center justify-between shadow-lg">
         <div className="flex flex-col">
           <span className="text-[11px] font-mono font-black text-amber-400">YOUR TARGETS:</span>
-          <span className="text-[9px] font-mono text-slate-400">Tap chip to change (1–6)</span>
+          <span className="text-[9px] font-mono text-slate-400">Tap chip to cycle (1–6)</span>
         </div>
 
         <div className="flex items-center gap-2">
