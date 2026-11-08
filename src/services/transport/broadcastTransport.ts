@@ -16,6 +16,7 @@ import { registerKnifeThrow, createKnifeMasterInitialState } from '../../engine/
 import { registerSumoRingOut } from '../../engine/sumoSpinEngine';
 import {
   setLuckyDiceCount,
+  updateLuckyDiceBet,
   submitLuckyDiceGuesses,
   rollLuckyDice,
   resetLuckyDiceNextRound
@@ -780,6 +781,12 @@ export class BroadcastTransport implements IRoomTransport {
       case 'LUCKY_DICE_SET_COUNT': {
         const { diceCount } = payload;
         room.gameState = setLuckyDiceCount(room.gameState, diceCount);
+        break;
+      }
+
+      case 'LUCKY_DICE_CHANGE_BET': {
+        const { dieIndex, newBet } = payload;
+        room.gameState = updateLuckyDiceBet(room.gameState, playerUid, dieIndex, newBet);
         break;
       }
 

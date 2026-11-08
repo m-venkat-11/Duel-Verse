@@ -18,12 +18,22 @@ export function createLuckyDiceInitialState(
   const validDiceCount = Math.max(1, Math.min(5, initialDiceCount));
   const initialRoll = Array.from({ length: validDiceCount }, () => Math.floor(Math.random() * 6) + 1);
 
+  // Default initial bets for both players so the game starts immediately!
+  const defaultP1 = Array.from({ length: validDiceCount }, (_, i) => ((i * 2 + 1) % 6) + 1);
+  const defaultP2 = Array.from({ length: validDiceCount }, (_, i) => ((i * 2 + 2) % 6) + 1);
+
   return {
     diceCount: validDiceCount,
-    phase: 'guessing',
+    phase: 'rolling',
     currentTurn: p1,
-    guesses: {},
-    cleared: {},
+    guesses: {
+      [p1]: defaultP1,
+      [p2]: defaultP2
+    },
+    cleared: {
+      [p1]: new Array(validDiceCount).fill(false),
+      [p2]: new Array(validDiceCount).fill(false)
+    },
     currentRoll: initialRoll,
     roundWinnerUid: null,
     roundScores,
@@ -35,16 +45,44 @@ export function createLuckyDiceInitialState(
 }
 
 export function setLuckyDiceCount(state: LuckyDiceState, diceCount: number): LuckyDiceState {
-  if (state.phase !== 'guessing') return state;
   const clamped = Math.max(1, Math.min(5, diceCount));
   const initialRoll = Array.from({ length: clamped }, () => Math.floor(Math.random() * 6) + 1);
+
+  const newGuesses: Record<string, number[]> = {};
+  const newCleared: Record<string, boolean[]> = {};
+
+  Object.keys(state.guesses).forEach((uid) => {
+    const existing = state.guesses[uid] || [];
+    const updated = [...existing];
+    while (updated.length < clamped) updated.push(Math.floor(Math.random() * 6) + 1);
+    newGuesses[uid] = updated.slice(0, clamped);
+    newCleared[uid] = new Array(clamped).fill(false);
+  });
 
   return {
     ...state,
     diceCount: clamped,
-    guesses: {},
-    cleared: {},
+    guesses: newGuesses,
+    cleared: newCleared,
     currentRoll: initialRoll
+  };
+}
+
+export function updateLuckyDiceBet(
+  state: LuckyDiceState,
+  playerUid: string,
+  dieIndex: number,
+  newBet: number
+): LuckyDiceState {
+  const existingGuesses = [...(state.guesses[playerUid] || new Array(state.diceCount).fill(1))];
+  existingGuesses[dieIndex] = Math.max(1, Math.min(6, newBet));
+
+  return {
+    ...state,
+    guesses: {
+      ...state.guesses,
+      [playerUid]: existingGuesses
+    }
   };
 }
 
@@ -54,8 +92,6 @@ export function submitLuckyDiceGuesses(
   guesses: number[],
   playerUids: string[]
 ): LuckyDiceState {
-  if (state.phase !== 'guessing') return state;
-
   const validGuesses = guesses.slice(0, state.diceCount).map((g) => Math.max(1, Math.min(6, g)));
   const newGuesses = { ...state.guesses, [playerUid]: validGuesses };
   const newCleared = { ...state.cleared, [playerUid]: new Array(state.diceCount).fill(false) };
@@ -63,21 +99,18 @@ export function submitLuckyDiceGuesses(
   const p1 = playerUids[0] || playerUid;
   const p2 = playerUids[1] || (playerUid === 'bot_rival' ? 'player' : 'bot_rival');
 
-  // If opponent is a bot (or single player practice), auto-pick bot guesses
   if ((p2 === 'bot_rival' || p2.startsWith('bot_') || playerUids.length < 2) && !newGuesses[p2]) {
     const botGuesses = Array.from({ length: state.diceCount }, () => Math.floor(Math.random() * 6) + 1);
     newGuesses[p2] = botGuesses;
     newCleared[p2] = new Array(state.diceCount).fill(false);
   }
 
-  const bothReady = Boolean(p1 && p2 && newGuesses[p1] && newGuesses[p2]);
-
   return {
     ...state,
     guesses: newGuesses,
     cleared: newCleared,
-    phase: bothReady ? 'rolling' : 'guessing',
-    currentTurn: p1 // P1 rolls first
+    phase: 'rolling',
+    currentTurn: p1
   };
 }
 
@@ -92,16 +125,6 @@ export function rollLuckyDice(
   matchOver: boolean;
   matchWinnerUid: string | null;
 } {
-  if (state.phase !== 'rolling') {
-    return {
-      newState: state,
-      roundOver: false,
-      roundWinnerUid: null,
-      matchOver: false,
-      matchWinnerUid: null
-    };
-  }
-
   // Roll fresh 3D dice values (1 to 6)
   const newRoll = Array.from({ length: state.diceCount }, () => Math.floor(Math.random() * 6) + 1);
 
@@ -188,12 +211,17 @@ export function resetLuckyDiceNextRound(state: LuckyDiceState, playerUids: strin
   const p1 = playerUids[0] || 'player';
   const initialRoll = Array.from({ length: state.diceCount }, () => Math.floor(Math.random() * 6) + 1);
 
+  // Preserve existing guesses so players don't have to re-enter setup!
+  const newCleared: Record<string, boolean[]> = {};
+  Object.keys(state.guesses).forEach((uid) => {
+    newCleared[uid] = new Array(state.diceCount).fill(false);
+  });
+
   return {
     ...state,
-    phase: 'guessing',
+    phase: 'rolling',
     currentTurn: p1,
-    guesses: {},
-    cleared: {},
+    cleared: newCleared,
     currentRoll: initialRoll,
     roundWinnerUid: null,
     rollCount: 0,
@@ -201,4 +229,3 @@ export function resetLuckyDiceNextRound(state: LuckyDiceState, playerUids: strin
     recentMatches: []
   };
 }
-

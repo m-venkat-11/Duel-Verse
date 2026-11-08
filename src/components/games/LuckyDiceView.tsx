@@ -5,7 +5,7 @@ import { GameLoop } from '../../engine/core/GameLoop';
 import { CanvasManager } from '../../engine/core/CanvasManager';
 import { JuiceEngine } from '../../engine/core/JuiceEngine';
 import { soundService } from '../../services/sound';
-import { Trophy, Dices, Sparkles, Lock, RefreshCw, CheckCircle2, Crown, Zap, Flame, Coins } from 'lucide-react';
+import { Trophy, Dices, Sparkles, RefreshCw, CheckCircle2, Coins, ArrowRight } from 'lucide-react';
 
 interface LuckyDiceViewProps {
   room: AuthoritativeRoomState<LuckyDiceState>;
@@ -18,7 +18,7 @@ interface PhysicalCasinoDie {
   id: number;
   x: number;
   y: number;
-  z: number; // Altitude above felt table
+  z: number; // Vertical altitude above felt table
   vx: number;
   vy: number;
   vz: number;
@@ -33,7 +33,6 @@ interface PhysicalCasinoDie {
   targetValue: number;
   isSettled: boolean;
   settleTimer: number;
-  matchedBy: string[]; // UIDs that matched this die
 }
 
 // 3D Rotation Utility
@@ -60,14 +59,19 @@ function rotate3D(
   return [x3, y3, z2];
 }
 
-// Target Euler angles so that face `N` faces UP towards the camera
-const FACE_EULER: Record<number, [number, number, number]> = {
-  1: [0, 0, 0],                            // Front face (+Z)
-  6: [Math.PI, 0, 0],                      // Back face (-Z)
-  2: [Math.PI / 2, 0, 0],                  // Top face (-Y)
-  5: [-Math.PI / 2, 0, 0],                 // Bottom face (+Y)
-  3: [0, -Math.PI / 2, 0],                 // Right face (+X)
-  4: [0, Math.PI / 2, 0]                   // Left face (-X)
+// Fixed Camera Isometric Elevation (looks down at 34° elevation, 45° azimuth)
+// This guarantees that the Top Face, Front-Left Face, and Front-Right Face are ALWAYS simultaneously visible!
+const CAM_PITCH = 0.58;
+const CAM_YAW = 0.78;
+
+// Local Euler rotations to orient each face value (1 to 6) squarely on top facing camera
+const TARGET_FACE_EULER: Record<number, [number, number, number]> = {
+  1: [-Math.PI / 2, 0, 0],                // +Z faces top
+  6: [Math.PI / 2, 0, 0],                 // -Z faces top
+  2: [0, 0, 0],                           // +Y faces top
+  5: [Math.PI, 0, 0],                     // -Y faces top
+  3: [0, 0, Math.PI / 2],                 // +X faces top
+  4: [0, 0, -Math.PI / 2]                 // -X faces top
 };
 
 export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, onDispatchAction }) => {
@@ -77,7 +81,6 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
   const players = Object.keys(room.players);
   const p1Uid = players[0] || playerUid;
   const p2Uid = players[1] || (p1Uid === 'bot_rival' ? 'player' : 'bot_rival');
-  const isHost = room.hostUid === playerUid;
   const isBotPlaying = Boolean(room.players['bot_rival'] || p2Uid === 'bot_rival' || players.length < 2);
 
   const p1Nickname = room.players[p1Uid]?.nickname || 'Player 1';
@@ -89,30 +92,17 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
     onDispatchActionRef.current = onDispatchAction;
   }, [onDispatchAction]);
 
-  // Player Betting Predictions
-  const [selectedBets, setSelectedBets] = useState<number[]>(() =>
-    Array.from({ length: diceCount }, () => Math.floor(Math.random() * 6) + 1)
-  );
-
-  useEffect(() => {
-    setSelectedBets((prev) => {
-      const copy = [...prev];
-      while (copy.length < diceCount) copy.push(Math.floor(Math.random() * 6) + 1);
-      return copy.slice(0, diceCount);
-    });
-  }, [diceCount]);
-
-  // Physical 3D Dice Array in Ref
+  // Dice simulation state
   const diceRef = useRef<PhysicalCasinoDie[]>([]);
   const isRollingRef = useRef<boolean>(false);
-  const laserBeamsRef = useRef<Array<{ x1: number; y1: number; x2: number; y2: number; alpha: number; color: string }>>([]);
+  const lastRollAnnouncement = useRef<string | null>(null);
 
   const W = 460;
-  const H = 490;
-  const TABLE_LEFT = 35;
-  const TABLE_RIGHT = 425;
-  const TABLE_TOP = 45;
-  const TABLE_BOTTOM = 445;
+  const H = 390;
+  const TABLE_LEFT = 40;
+  const TABLE_RIGHT = 420;
+  const TABLE_TOP = 40;
+  const TABLE_BOTTOM = 350;
 
   // Initialize 3D Casino Dice
   const initDice = (count: number, values: number[]) => {
@@ -122,12 +112,12 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
 
     for (let i = 0; i < count; i++) {
       const val = values[i] || Math.floor(Math.random() * 6) + 1;
-      const angles = FACE_EULER[val] || [0, 0, 0];
+      const angles = TARGET_FACE_EULER[val] || [0, 0, 0];
 
       newList.push({
         id: i,
         x: TABLE_LEFT + spacing * (i + 1),
-        y: (TABLE_TOP + TABLE_BOTTOM) / 2 + 15,
+        y: (TABLE_TOP + TABLE_BOTTOM) / 2 + 10,
         z: 0,
         vx: 0,
         vy: 0,
@@ -142,8 +132,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         colorType: colors[i % colors.length],
         targetValue: val,
         isSettled: true,
-        settleTimer: 0,
-        matchedBy: []
+        settleTimer: 0
       });
     }
     diceRef.current = newList;
@@ -163,18 +152,17 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
     diceRef.current.forEach((die, idx) => {
       die.targetValue = targetRoll[idx] || Math.floor(Math.random() * 6) + 1;
       die.isSettled = false;
-      die.settleTimer = 1.05 + idx * 0.16; // Staggered settling
-      die.matchedBy = [];
+      die.settleTimer = 1.05 + idx * 0.16;
 
       // Physical shoot trajectory towards the back wall
-      die.vz = 440 + Math.random() * 150; // High vertical launch
+      die.vz = 450 + Math.random() * 150;
       die.vx = (Math.random() - 0.5) * 380;
-      die.vy = -180 + (Math.random() - 0.5) * 220; // Thrown forward towards bumper wall
+      die.vy = -190 + (Math.random() - 0.5) * 200;
 
       // Wild 3D angular spin
-      die.vrotX = (Math.random() - 0.5) * 28;
-      die.vrotY = (Math.random() - 0.5) * 28;
-      die.vrotZ = (Math.random() - 0.5) * 28;
+      die.vrotX = (Math.random() - 0.5) * 26;
+      die.vrotY = (Math.random() - 0.5) * 26;
+      die.vrotZ = (Math.random() - 0.5) * 26;
     });
   };
 
@@ -185,9 +173,11 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       prevRollCount.current = gameState.rollCount;
       if (gameState.currentRoll) {
         trigger3DCrapsToss(gameState.currentRoll);
+        const roller = gameState.lastRolledBy === playerUid ? 'YOU' : p2Nickname;
+        lastRollAnnouncement.current = `${roller} ROLLED: [ ${gameState.currentRoll.join(' - ')} ]`;
       }
     }
-  }, [gameState?.rollCount, gameState?.currentRoll]);
+  }, [gameState?.rollCount, gameState?.currentRoll, gameState?.lastRolledBy, playerUid, p2Nickname]);
 
   // Automated CyberBot roll trigger (Guarantees bot ALWAYS takes turn without getting stuck!)
   useEffect(() => {
@@ -205,20 +195,20 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
     }
   }, [gameState?.phase, gameState?.currentTurn, p2Uid, isBotPlaying, gameState?.roundWinnerUid]);
 
-  // Play Victory FX on round win
+  // Victory Sound FX
   useEffect(() => {
     if (gameState?.roundWinnerUid) {
       soundService.playVictory();
     }
   }, [gameState?.roundWinnerUid]);
 
-  // Permanent 60 FPS GameLoop (Never unmounted, always alive!)
+  // 60 FPS GameLoop for 3D Physics & Isometric Rendering
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const canvasMgr = new CanvasManager(canvas);
-    const juice = new JuiceEngine(350);
+    const juice = new JuiceEngine(300);
 
     const update = (dt: number) => {
       const clampedDt = Math.min(0.04, dt);
@@ -231,7 +221,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
           allSettled = false;
           die.settleTimer -= clampedDt;
 
-          // Gravity & Velocity
+          // 3D Gravity & Velocity
           die.vz -= 1200 * clampedDt;
           die.x += die.vx * clampedDt;
           die.y += die.vy * clampedDt;
@@ -251,8 +241,8 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
           if (die.z <= 0) {
             die.z = 0;
             if (die.settleTimer > 0) {
-              // Elastic bounce on velvet felt
-              die.vz = -die.vz * 0.54;
+              // Elastic bounce on felt
+              die.vz = -die.vz * 0.52;
               die.vx *= 0.82;
               die.vy *= 0.82;
               die.vrotX *= 0.72;
@@ -263,11 +253,11 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
               juice.addTrauma(0.12);
               juice.emitSparks(die.x, die.y, 6, '#f59e0b', '#ffffff', 2.2);
             } else {
-              // Settling: Magnetic snap to target face orientation!
-              const targetEuler = FACE_EULER[die.targetValue] || [0, 0, 0];
-              die.rotX += (targetEuler[0] - die.rotX) * Math.min(1, 15 * clampedDt);
-              die.rotY += (targetEuler[1] - die.rotY) * Math.min(1, 15 * clampedDt);
-              die.rotZ += (targetEuler[2] - die.rotZ) * Math.min(1, 15 * clampedDt);
+              // Settling: Smooth magnetic snap to target face orientation
+              const targetEuler = TARGET_FACE_EULER[die.targetValue] || [0, 0, 0];
+              die.rotX += (targetEuler[0] - die.rotX) * Math.min(1, 16 * clampedDt);
+              die.rotY += (targetEuler[1] - die.rotY) * Math.min(1, 16 * clampedDt);
+              die.rotZ += (targetEuler[2] - die.rotZ) * Math.min(1, 16 * clampedDt);
 
               die.vx *= 0.55;
               die.vy *= 0.55;
@@ -316,11 +306,6 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       if (allSettled && isRollingRef.current) {
         isRollingRef.current = false;
       }
-
-      laserBeamsRef.current = laserBeamsRef.current.filter((b) => {
-        b.alpha -= clampedDt * 2.2;
-        return b.alpha > 0;
-      });
     };
 
     const render = () => {
@@ -333,67 +318,56 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       const scaleY = canvasMgr.height / H;
       ctx.scale(scaleX, scaleY);
 
-      // 1. Vegas VIP Casino Felt Table
-      const feltGrad = ctx.createRadialGradient(W / 2, H / 2, 40, W / 2, H / 2, 300);
+      // 1. Luxury Vegas VIP Casino Felt Table
+      const feltGrad = ctx.createRadialGradient(W / 2, H / 2, 40, W / 2, H / 2, 260);
       feltGrad.addColorStop(0, '#043b27');
       feltGrad.addColorStop(0.65, '#022417');
       feltGrad.addColorStop(1, '#01120b');
       ctx.fillStyle = feltGrad;
       ctx.fillRect(0, 0, W, H);
 
-      // Casino Mahogany Table Rim with Brass Studs
+      // Casino Mahogany Table Rim with Brass Inlay
       ctx.fillStyle = '#1e0c05';
-      ctx.fillRect(0, 0, W, TABLE_TOP - 15);
-      ctx.fillRect(0, TABLE_BOTTOM + 15, W, H - (TABLE_BOTTOM + 15));
-      ctx.fillRect(0, 0, TABLE_LEFT - 12, H);
-      ctx.fillRect(TABLE_RIGHT + 12, 0, W - (TABLE_RIGHT + 12), H);
+      ctx.fillRect(0, 0, W, TABLE_TOP - 12);
+      ctx.fillRect(0, TABLE_BOTTOM + 12, W, H - (TABLE_BOTTOM + 12));
+      ctx.fillRect(0, 0, TABLE_LEFT - 10, H);
+      ctx.fillRect(TABLE_RIGHT + 10, 0, W - (TABLE_RIGHT + 10), H);
 
-      // Brass Inlay Trim
       ctx.strokeStyle = '#d97706';
       ctx.lineWidth = 2.5;
-      ctx.strokeRect(TABLE_LEFT - 12, TABLE_TOP - 15, TABLE_RIGHT - TABLE_LEFT + 24, TABLE_BOTTOM - TABLE_TOP + 30);
+      ctx.strokeRect(TABLE_LEFT - 10, TABLE_TOP - 12, TABLE_RIGHT - TABLE_LEFT + 20, TABLE_BOTTOM - TABLE_TOP + 24);
 
-      // Real Craps Diamond Rubber Pyramid Bumpers on Back Wall (Where dice rebound!)
+      // Real Craps Diamond Rubber Pyramid Bumpers on Back Wall
       ctx.fillStyle = '#0f172a';
-      ctx.fillRect(TABLE_LEFT - 10, TABLE_TOP - 14, TABLE_RIGHT - TABLE_LEFT + 20, 14);
+      ctx.fillRect(TABLE_LEFT - 8, TABLE_TOP - 12, TABLE_RIGHT - TABLE_LEFT + 16, 12);
 
       ctx.fillStyle = '#dc2626';
       const pyrW = 12;
-      for (let px = TABLE_LEFT - 10; px < TABLE_RIGHT + 10; px += pyrW) {
+      for (let px = TABLE_LEFT - 8; px < TABLE_RIGHT + 8; px += pyrW) {
         ctx.beginPath();
-        ctx.moveTo(px, TABLE_TOP - 14);
+        ctx.moveTo(px, TABLE_TOP - 12);
         ctx.lineTo(px + pyrW / 2, TABLE_TOP);
-        ctx.lineTo(px + pyrW, TABLE_TOP - 14);
+        ctx.lineTo(px + pyrW, TABLE_TOP - 12);
         ctx.closePath();
         ctx.fill();
       }
 
-      // Craps Silkscreen Table Markings (Gold Filigree)
+      // Craps Table Markings (Gold Silkscreen Lines)
       ctx.strokeStyle = 'rgba(245, 158, 11, 0.16)';
       ctx.lineWidth = 1.5;
+      ctx.strokeRect(TABLE_LEFT + 16, TABLE_TOP + 20, TABLE_RIGHT - TABLE_LEFT - 32, TABLE_BOTTOM - TABLE_TOP - 40);
 
-      // Center Field Bet Area
-      ctx.strokeRect(TABLE_LEFT + 20, TABLE_TOP + 30, TABLE_RIGHT - TABLE_LEFT - 40, TABLE_BOTTOM - TABLE_TOP - 60);
-
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.22)';
-      ctx.font = '900 13px "Outfit", sans-serif';
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
+      ctx.font = '900 12px "Outfit", sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('★ DUELVERSE HIGH ROLLER CRAPS ★', W / 2, TABLE_TOP + 55);
+      ctx.fillText('★ DUELVERSE HIGH ROLLER CRAPS ★', W / 2, TABLE_TOP + 40);
 
-      ctx.font = '700 9px "Outfit", sans-serif';
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.15)';
-      ctx.fillText('PASS LINE • FIELD BETS • NATURAL JACKPOT', W / 2, TABLE_TOP + 72);
-
-      // Center Circular Shooting Ring
+      // Center Dice Ring
       ctx.beginPath();
-      ctx.arc(W / 2, (TABLE_TOP + TABLE_BOTTOM) / 2 + 15, 75, 0, Math.PI * 2);
+      ctx.arc(W / 2, (TABLE_TOP + TABLE_BOTTOM) / 2 + 10, 60, 0, Math.PI * 2);
       ctx.stroke();
 
-      ctx.font = '900 10px "Outfit", sans-serif';
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.18)';
-      ctx.fillText('🎲 LIVE SHOOT TRAY 🎲', W / 2, (TABLE_TOP + TABLE_BOTTOM) / 2 + 20);
-
-      // 2. Render 3D Translucent Casino Acrylic Dice
+      // 2. Render TRUE 3D Isometric Acrylic Casino Dice
       const sortedDice = [...diceRef.current].sort((a, b) => a.y - b.y);
 
       sortedDice.forEach((die) => {
@@ -402,13 +376,15 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
 
         // A. Dynamic Ground Shadow on Felt
         ctx.save();
-        ctx.fillStyle = `rgba(0, 0, 0, ${Math.max(0.12, 0.58 - zAlt * 0.002)})`;
+        const shadowScale = Math.max(0.4, 1 - zAlt / 350);
+        const shadowAlpha = Math.max(0.12, 0.58 * shadowScale);
+        ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
         ctx.beginPath();
         ctx.ellipse(
           die.x,
-          die.y + 14 + zAlt * 0.08,
-          Math.max(12, die.size * 0.7 * (1 - zAlt * 0.001)),
-          Math.max(6, die.size * 0.38 * (1 - zAlt * 0.001)),
+          die.y + 16 + zAlt * 0.08,
+          die.size * 0.72 * shadowScale,
+          die.size * 0.38 * shadowScale,
           0,
           0,
           Math.PI * 2
@@ -416,7 +392,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         ctx.fill();
         ctx.restore();
 
-        // B. 3D Cube Geometry with True Directional Shading
+        // B. 3D Isometric Cube Projection (Rotated into Camera Elevation & Azimuth)
         const rawVerts = [
           [-s, -s, -s],
           [s, -s, -s],
@@ -428,47 +404,58 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
           [-s, s, s]
         ];
 
-        const rotVerts = rawVerts.map((v) => rotate3D(v[0], v[1], v[2], die.rotX, die.rotY, die.rotZ));
-        const projVerts = rotVerts.map((v) => ({
+        // 1) Rotate by die physics rotation in world
+        const worldVerts = rawVerts.map((v) => rotate3D(v[0], v[1], v[2], die.rotX, die.rotY, die.rotZ));
+
+        // 2) Rotate by camera isometric view angles (CAM_PITCH, CAM_YAW)
+        const camVerts = worldVerts.map((v) => rotate3D(v[0], v[1], v[2], CAM_PITCH, CAM_YAW, 0));
+
+        // 3) Screen projection
+        const projVerts = camVerts.map((v) => ({
           x: die.x + v[0],
-          y: die.y - zAlt + v[1],
+          y: die.y - zAlt * 0.7 + v[1],
           z: v[2]
         }));
 
+        // 6 Cube Faces (Opposite sum = 7)
         const faces = [
-          { value: 1, indices: [4, 5, 6, 7], normal: [0, 0, 1] },
-          { value: 6, indices: [1, 0, 3, 2], normal: [0, 0, -1] },
-          { value: 3, indices: [5, 1, 2, 6], normal: [1, 0, 0] },
-          { value: 4, indices: [0, 4, 7, 3], normal: [-1, 0, 0] },
-          { value: 2, indices: [0, 1, 5, 4], normal: [0, -1, 0] },
-          { value: 5, indices: [7, 6, 2, 3], normal: [0, 1, 0] }
+          { value: 1, indices: [4, 5, 6, 7], normal: [0, 0, 1] }, // Front (+Z)
+          { value: 6, indices: [1, 0, 3, 2], normal: [0, 0, -1] }, // Back (-Z)
+          { value: 3, indices: [5, 1, 2, 6], normal: [1, 0, 0] }, // Right (+X)
+          { value: 4, indices: [0, 4, 7, 3], normal: [-1, 0, 0] }, // Left (-X)
+          { value: 2, indices: [0, 1, 5, 4], normal: [0, 1, 0] }, // Top (+Y)
+          { value: 5, indices: [7, 6, 2, 3], normal: [0, -1, 0] } // Bottom (-Y)
         ];
 
+        // Back-face culling in camera view space
         const visibleFaces = faces
           .map((f) => {
-            const rotNorm = rotate3D(f.normal[0], f.normal[1], f.normal[2], die.rotX, die.rotY, die.rotZ);
+            const worldNorm = rotate3D(f.normal[0], f.normal[1], f.normal[2], die.rotX, die.rotY, die.rotZ);
+            const camNorm = rotate3D(worldNorm[0], worldNorm[1], worldNorm[2], CAM_PITCH, CAM_YAW, 0);
             const avgZ = f.indices.reduce((sum, idx) => sum + projVerts[idx].z, 0) / 4;
             return {
               ...f,
-              rotNorm,
+              camNorm,
               avgZ,
-              isVisible: rotNorm[2] > -0.05
+              isVisible: camNorm[2] > 0 // Facing camera!
             };
           })
           .filter((f) => f.isVisible)
           .sort((a, b) => a.avgZ - b.avgZ);
 
+        // Render each visible 3D face with rich specular shading
         visibleFaces.forEach((f) => {
           const v0 = projVerts[f.indices[0]];
           const v1 = projVerts[f.indices[1]];
           const v2 = projVerts[f.indices[2]];
           const v3 = projVerts[f.indices[3]];
 
-          const lightDir = [-0.4, -0.6, 0.7];
-          const dot = f.rotNorm[0] * lightDir[0] + f.rotNorm[1] * lightDir[1] + f.rotNorm[2] * lightDir[2];
+          // Directional Lighting
+          const lightDir = [-0.3, -0.6, 0.7];
+          const dot = f.camNorm[0] * lightDir[0] + f.camNorm[1] * lightDir[1] + f.camNorm[2] * lightDir[2];
           const brightness = Math.max(0.45, Math.min(1.0, 0.7 + dot * 0.45));
 
-          // Vegas Translucent Jewel Acrylic Colors
+          // Jewel Acrylic Colors
           let faceHex = '#dc2626'; // Vegas Ruby Red
           if (die.colorType === 'sapphire') faceHex = '#2563eb';
           else if (die.colorType === 'amber') faceHex = '#d97706';
@@ -486,19 +473,19 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
           ctx.globalAlpha = brightness;
           ctx.fill();
 
-          // Beveled Silver / Acrylic Edge
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
-          ctx.lineWidth = 1.8;
+          // Beveled Silver Edge Rim
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.lineWidth = 1.6;
           ctx.stroke();
 
-          // Specular Glare across top face
-          if (f.rotNorm[2] > 0.6) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+          // Specular Glare on Top Face
+          if (f.camNorm[1] < -0.4) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
             ctx.fill();
           }
           ctx.restore();
 
-          // Draw Inset Casino Pips (Crisp white circular dots)
+          // Inset White Casino Pips (Drawn in 3D perspective!)
           const center = {
             x: (v0.x + v1.x + v2.x + v3.x) / 4,
             y: (v0.y + v1.y + v2.y + v3.y) / 4
@@ -532,18 +519,15 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
 
           ctx.save();
           pipPositions.forEach(([pu, pv]) => {
-            const px = center.x + vecU.x * pu * 1.5 + vecV.x * pv * 1.5;
-            const py = center.y + vecU.y * pu * 1.5 + vecV.y * pv * 1.5;
-            const pipR = Math.max(2.5, (die.size / 13) * brightness);
+            const px = center.x + vecU.x * pu * 1.45 + vecV.x * pv * 1.45;
+            const py = center.y + vecU.y * pu * 1.45 + vecV.y * pv * 1.45;
+            const pipR = Math.max(2.2, (die.size / 13) * brightness);
 
             ctx.beginPath();
             ctx.arc(px, py, pipR, 0, Math.PI * 2);
-
-            // In real casino dice, pips are filled with flush opaque white paint!
             ctx.fillStyle = val === 1 && die.colorType === 'ruby' ? '#fbbf24' : '#ffffff';
             ctx.fill();
 
-            // Pip inner engraved shadow
             ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
             ctx.lineWidth = 0.8;
             ctx.stroke();
@@ -555,7 +539,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         ctx.fillStyle = '#fbbf24';
         ctx.font = '900 11px "Outfit", sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(`DIE #${die.id + 1}`, die.x, die.y + die.size * 0.75 + 16);
+        ctx.fillText(`DIE #${die.id + 1}`, die.x, die.y + die.size * 0.65 + 16);
       });
 
       ctx.restore();
@@ -571,61 +555,50 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
   }, []);
 
   // Handlers
-  const handleSelectBet = (index: number, num: number) => {
+  const handleCycleBet = (dieIndex: number) => {
     soundService.playImpact(0.8);
-    setSelectedBets((prev) => {
-      const copy = [...prev];
-      copy[index] = num;
-      return copy;
-    });
+    const existing = myGuesses ? myGuesses[dieIndex] : (dieIndex * 2 + 1) % 6 + 1;
+    const nextBet = (existing % 6) + 1; // Cycles 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 1
 
-    // Also preview rotate 3D die on table!
-    const die = diceRef.current[index];
+    onDispatchActionRef.current('LUCKY_DICE_CHANGE_BET', { dieIndex, newBet: nextBet });
+
+    // Preview rotation on 3D die
+    const die = diceRef.current[dieIndex];
     if (die) {
-      die.targetValue = num;
-      const targetAngle = FACE_EULER[num] || [0, 0, 0];
+      die.targetValue = nextBet;
+      const targetAngle = TARGET_FACE_EULER[nextBet] || [0, 0, 0];
       die.rotX = targetAngle[0];
       die.rotY = targetAngle[1];
       die.rotZ = targetAngle[2];
     }
   };
 
-  const handleRandomizeBets = () => {
+  const handleRandomizeAllBets = () => {
     soundService.playCountdown(1);
-    const randomized = Array.from({ length: diceCount }, () => Math.floor(Math.random() * 6) + 1);
-    setSelectedBets(randomized);
+    for (let i = 0; i < diceCount; i++) {
+      const rand = Math.floor(Math.random() * 6) + 1;
+      onDispatchActionRef.current('LUCKY_DICE_CHANGE_BET', { dieIndex: i, newBet: rand });
 
-    randomized.forEach((num, idx) => {
-      const die = diceRef.current[idx];
+      const die = diceRef.current[i];
       if (die) {
-        die.targetValue = num;
-        const targetAngle = FACE_EULER[num] || [0, 0, 0];
+        die.targetValue = rand;
+        const targetAngle = TARGET_FACE_EULER[rand] || [0, 0, 0];
         die.rotX = targetAngle[0];
         die.rotY = targetAngle[1];
         die.rotZ = targetAngle[2];
       }
-    });
-  };
-
-  const handleSetDiceCount = (count: number) => {
-    soundService.playImpact(0.8);
-    onDispatchActionRef.current('LUCKY_DICE_SET_COUNT', { diceCount: count });
-  };
-
-  const handleLockBets = () => {
-    soundService.playScore();
-    onDispatchActionRef.current('LUCKY_DICE_SUBMIT_GUESS', { guesses: selectedBets });
+    }
   };
 
   const handleRollDice = () => {
-    if (isRollingRef.current || gameState.phase !== 'rolling' || gameState.currentTurn !== playerUid) return;
+    if (isRollingRef.current || gameState?.phase !== 'rolling' || gameState.currentTurn !== playerUid) return;
     onDispatchActionRef.current('LUCKY_DICE_ROLL', { actingUid: playerUid });
   };
 
-  const myGuesses = gameState?.guesses?.[playerUid];
+  const myGuesses = gameState?.guesses?.[playerUid] || Array.from({ length: diceCount }, (_, i) => ((i * 2 + 1) % 6) + 1);
   const myCleared = gameState?.cleared?.[playerUid] || new Array(diceCount).fill(false);
   const oppUid = p1Uid === playerUid ? p2Uid : p1Uid;
-  const oppGuesses = gameState?.guesses?.[oppUid];
+  const oppGuesses = gameState?.guesses?.[oppUid] || Array.from({ length: diceCount }, (_, i) => ((i * 2 + 2) % 6) + 1);
   const oppCleared = gameState?.cleared?.[oppUid] || new Array(diceCount).fill(false);
 
   const isMyTurn = gameState?.currentTurn === playerUid;
@@ -634,230 +607,157 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
 
   return (
     <div className="w-full max-w-md mx-auto flex flex-col items-center select-none gap-2 px-1">
-      {/* 1. Vegas High Roller Header Scoreboard */}
-      <div className="w-full flex items-center justify-between bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border-2 border-amber-500/40 rounded-2xl px-3 py-2 shadow-2xl backdrop-blur-md">
-        {/* P1 Chip Count */}
+      {/* 1. Sleek Casino Duel Scoreboard Header */}
+      <div className="w-full flex items-center justify-between bg-slate-900/90 border-2 border-amber-500/30 rounded-2xl px-3 py-1.5 shadow-xl backdrop-blur-md">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center font-black font-['Outfit'] text-amber-300 text-sm shadow-inner">
+          <div className="w-8 h-8 rounded-xl bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center font-black font-['Outfit'] text-amber-300 text-sm">
             {p1Score}
           </div>
-          <div className="flex flex-col">
-            <span className="text-xs font-black font-['Outfit'] text-amber-400 truncate max-w-[85px]">
-              {p1Uid === playerUid ? 'YOU' : p1Nickname}
-            </span>
-            <span className="text-[10px] font-mono text-slate-400">
-              {myCleared.filter(Boolean).length}/{diceCount} Cleared
-            </span>
-          </div>
-        </div>
-
-        {/* Casino Stakes Badge */}
-        <div className="flex flex-col items-center">
-          <div className="flex items-center gap-1 text-amber-300 font-mono text-xs font-black">
-            <Coins className="w-4 h-4 text-yellow-400 animate-bounce" />
-            <span>RACE TO {room.maxRounds || 3} WINS</span>
-          </div>
-          <span className="text-[9px] font-mono text-emerald-400 font-bold uppercase tracking-widest">
-            VEGAS HIGH ROLLER CRAPS
+          <span className="text-xs font-black font-['Outfit'] text-amber-400">
+            {p1Uid === playerUid ? 'YOU' : p1Nickname}
           </span>
         </div>
 
-        {/* P2 Chip Count */}
+        <div className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-slate-950 border border-slate-800 text-[11px] font-mono font-bold text-slate-300">
+          <Coins className="w-3.5 h-3.5 text-yellow-400" />
+          <span>BEST OF {room.maxRounds || 3}</span>
+        </div>
+
         <div className="flex items-center gap-2 flex-row-reverse text-right">
-          <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border-2 border-cyan-400 flex items-center justify-center font-black font-['Outfit'] text-cyan-300 text-sm shadow-inner">
+          <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border-2 border-cyan-400 flex items-center justify-center font-black font-['Outfit'] text-cyan-300 text-sm">
             {p2Score}
           </div>
-          <div className="flex flex-col">
-            <span className="text-xs font-black font-['Outfit'] text-cyan-400 truncate max-w-[85px]">
-              {p2Uid === playerUid ? 'YOU' : p2Nickname}
-            </span>
-            <span className="text-[10px] font-mono text-slate-400">
-              {oppCleared.filter(Boolean).length}/{diceCount} Cleared
-            </span>
-          </div>
+          <span className="text-xs font-black font-['Outfit'] text-cyan-400">
+            {p2Uid === playerUid ? 'YOU' : p2Nickname}
+          </span>
         </div>
       </div>
 
-      {/* 2. Opponent's Bet Line (House / Rival) */}
-      <div className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-2.5 py-1.5 flex items-center justify-between shadow-md">
-        <span className="text-[11px] font-mono font-bold text-cyan-400 flex items-center gap-1">
-          <span>{oppUid === playerUid ? 'YOU' : p2Nickname}</span>
-          <span className="text-slate-500">BETS:</span>
+      {/* 2. Unmistakable Turn Announcement Spotlight Bar */}
+      <div
+        className={`w-full py-2 px-3 rounded-2xl border-2 flex items-center justify-between shadow-xl transition-all ${
+          isMyTurn
+            ? 'bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-500/20 border-amber-400 text-amber-300 shadow-amber-500/20 animate-pulse'
+            : 'bg-gradient-to-r from-cyan-950/40 via-cyan-900/30 to-cyan-950/40 border-cyan-500/50 text-cyan-300'
+        }`}
+      >
+        <div className="flex items-center gap-2 font-black font-['Outfit'] text-sm tracking-wide">
+          <Dices className={`w-5 h-5 ${isMyTurn ? 'text-amber-400 animate-spin-slow' : 'text-cyan-400'}`} />
+          <span>{isMyTurn ? '⭐ YOUR TURN TO SHOOT! ⭐' : `🤖 ${p2Nickname.toUpperCase()} IS SHOOTING...`}</span>
+        </div>
+
+        <span className="text-[10px] font-mono text-slate-400 font-bold">
+          {myCleared.filter(Boolean).length}/{diceCount} vs {oppCleared.filter(Boolean).length}/{diceCount} Cleared
         </span>
-        <div className="flex items-center gap-1.5">
+      </div>
+
+      {/* 3. CyberBot / Opponent Prediction Chips (Above Table) */}
+      <div className="w-full bg-slate-950/90 border border-slate-800/80 rounded-xl px-2.5 py-1.5 flex items-center justify-between shadow-md">
+        <span className="text-[11px] font-mono font-bold text-cyan-400">
+          {oppUid === playerUid ? 'YOU' : p2Nickname}:
+        </span>
+        <div className="flex items-center gap-2">
           {Array.from({ length: diceCount }).map((_, idx) => (
             <div
               key={idx}
-              className={`px-2 py-0.5 rounded-lg border text-xs font-mono flex items-center gap-1 transition-all ${
+              className={`px-2.5 py-1 rounded-xl border flex items-center gap-1.5 font-mono transition-all ${
                 oppCleared[idx]
-                  ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-sm shadow-emerald-500/30'
+                  ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-md shadow-emerald-500/30'
                   : 'bg-slate-900 border-slate-800 text-slate-300'
               }`}
             >
-              <span className="text-[9px] text-slate-500">#{idx + 1}:</span>
-              <span className="font-black text-cyan-300">{oppGuesses ? oppGuesses[idx] : '?'}</span>
-              {oppCleared[idx] && <CheckCircle2 className="w-3 h-3 text-emerald-400 stroke-[3]" />}
+              <span className="text-[10px] text-slate-500">#{idx + 1}</span>
+              <span className="text-sm font-black text-cyan-300">{oppGuesses[idx]}</span>
+              {oppCleared[idx] && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" />}
             </div>
           ))}
         </div>
       </div>
 
-      {/* 3. The Vegas Craps 3D Table Stadium (PERMANENT CANVAS, NEVER DISMOUNTED!) */}
-      <div className="w-full h-[44vh] min-h-[300px] max-h-[420px] aspect-[460/490] rounded-3xl overflow-hidden shadow-2xl border-4 border-amber-900/60 relative bg-[#01120b]">
+      {/* 4. Spacious 3D Vegas Craps Table Canvas (Permanent 60 FPS) */}
+      <div className="w-full h-[40vh] min-h-[280px] max-h-[380px] aspect-[460/390] rounded-3xl overflow-hidden shadow-2xl border-4 border-amber-900/60 relative bg-[#01120b]">
         <canvas ref={canvasRef} className="w-full h-full block select-none" />
 
-        {/* Turn Status Pill Overlay */}
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-slate-950/90 border border-amber-500/40 px-3 py-1 rounded-full text-[10px] font-mono text-slate-200 flex items-center gap-1.5 shadow-lg pointer-events-none">
-          <span className={`w-2 h-2 rounded-full ${isMyTurn ? 'bg-amber-400 animate-ping' : 'bg-cyan-400'}`} />
-          <span>{isMyTurn ? '🎲 YOUR TURN TO SHOOT' : `⏳ ${p2Nickname.toUpperCase()}'S TURN TO SHOOT`}</span>
+        {/* Live Roll Callout Banner on Table */}
+        {lastRollAnnouncement.current && (
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-slate-950/95 border border-amber-500/40 px-3 py-1 rounded-full text-[10px] font-mono text-amber-300 font-bold shadow-xl pointer-events-none whitespace-nowrap">
+            {lastRollAnnouncement.current}
+          </div>
+        )}
+      </div>
+
+      {/* 5. Player's Prediction Chips (Spacious & Interactive) */}
+      <div className="w-full bg-slate-950/90 border-2 border-amber-500/30 rounded-2xl p-2.5 flex items-center justify-between shadow-lg">
+        <div className="flex flex-col">
+          <span className="text-[11px] font-mono font-black text-amber-400">YOUR TARGETS:</span>
+          <span className="text-[9px] font-mono text-slate-400">Tap chip to change (1–6)</span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {Array.from({ length: diceCount }).map((_, idx) => (
+            <button
+              key={idx}
+              onClick={() => handleCycleBet(idx)}
+              className={`px-3 py-1.5 rounded-xl border-2 flex items-center gap-1.5 font-mono active:scale-95 transition-all cursor-pointer ${
+                myCleared[idx]
+                  ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-md shadow-emerald-500/40'
+                  : 'bg-slate-900 border-amber-400/60 text-white hover:border-amber-400'
+              }`}
+              title="Click to cycle lucky number"
+            >
+              <span className="text-[10px] text-amber-400/80">#{idx + 1}</span>
+              <span className="text-base font-black text-amber-300">{myGuesses[idx]}</span>
+              {myCleared[idx] ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 stroke-[3]" />
+              ) : (
+                <span className="text-[9px] text-slate-400">✎</span>
+              )}
+            </button>
+          ))}
+
+          {/* Quick Randomize Button */}
+          <button
+            onClick={handleRandomizeAllBets}
+            className="p-2 rounded-xl bg-slate-900 border border-slate-700 hover:border-amber-400 text-slate-300 hover:text-white active:scale-95 transition"
+            title="Randomize all lucky targets"
+          >
+            <RefreshCw className="w-4 h-4 text-cyan-400" />
+          </button>
         </div>
       </div>
 
-      {/* 4. Interactive Betting Chip Tray OR Live Rolling Controls */}
-      {gameState.phase === 'guessing' && !myGuesses ? (
-        /* --- PHASE 1: BETTING / SELECTION CONTROLS --- */
-        <div className="w-full bg-slate-950/90 border-2 border-slate-800 rounded-2xl p-3 flex flex-col gap-2 shadow-xl">
-          {/* Dice Count Selector */}
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-            <span className="text-[11px] font-mono text-amber-400 font-bold flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Dice Quantity:</span>
-            </span>
-            <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800">
-              {[1, 2, 3, 4, 5].map((cnt) => (
-                <button
-                  key={cnt}
-                  onClick={() => handleSetDiceCount(cnt)}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-black font-mono transition-all ${
-                    diceCount === cnt
-                      ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-md scale-105'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {cnt}
-                  {cnt === 3 && '⭐'}
-                </button>
-              ))}
-            </div>
+      {/* 6. Giant Tactile Arcade Spin / Roll Button */}
+      <div className="w-full pt-1">
+        {isMyTurn ? (
+          <button
+            onClick={handleRollDice}
+            className="w-full h-14 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:brightness-110 active:scale-95 text-slate-950 font-black font-['Outfit'] text-lg flex items-center justify-center gap-2.5 shadow-xl shadow-amber-500/40 transition-all cursor-pointer"
+          >
+            <Dices className="w-6 h-6 animate-bounce" />
+            <span>🎲 SHOOT THE CRAPS DICE! (YOUR TURN)</span>
+          </button>
+        ) : (
+          <div className="w-full h-14 rounded-2xl bg-slate-900/90 border-2 border-slate-700 flex items-center justify-center gap-2 text-cyan-300 font-mono text-sm font-bold shadow-md">
+            <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
+            <span>{isBotPlaying ? 'CyberBot is shooting the dice...' : 'Waiting for opponent to shoot...'}</span>
           </div>
+        )}
+      </div>
 
-          {/* Place Chip Bets for each Die */}
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[11px] font-mono text-slate-300 font-bold">
-              Place your lucky chip on each die (1 to 6):
-            </span>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {Array.from({ length: diceCount }).map((_, idx) => (
-                <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-2 flex flex-col items-center gap-1.5">
-                  <div className="flex items-center justify-between w-full text-[10px] font-mono text-slate-400 font-bold px-1">
-                    <span>Die #{idx + 1}</span>
-                    <span className="text-amber-400 font-black">Bet: {selectedBets[idx] || 1}</span>
-                  </div>
-                  <div className="grid grid-cols-6 gap-1 w-full">
-                    {[1, 2, 3, 4, 5, 6].map((num) => (
-                      <button
-                        key={num}
-                        onClick={() => handleSelectBet(idx, num)}
-                        className={`h-7 rounded-lg text-xs font-black font-mono flex items-center justify-center transition-all ${
-                          selectedBets[idx] === num
-                            ? 'bg-amber-400 text-slate-950 scale-110 shadow-md border border-white'
-                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                        }`}
-                      >
-                        {num}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex items-center gap-2 pt-1">
-            <button
-              onClick={handleRandomizeBets}
-              className="flex-1 h-11 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-700 text-xs font-black font-mono text-slate-200 flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
-            >
-              <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
-              <span>RANDOMIZE</span>
-            </button>
-            <button
-              onClick={handleLockBets}
-              className="flex-[2] h-11 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:brightness-110 active:scale-95 text-xs font-black font-mono text-slate-950 flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/30"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span>LOCK BETS & ENTER CASINO</span>
-            </button>
-          </div>
-        </div>
-      ) : (
-        /* --- PHASE 2: CRAPS SHOOTING / ROLLING CONTROLS --- */
-        <div className="w-full flex flex-col gap-2">
-          {/* Player's Own Bet Line */}
-          <div className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-2.5 py-1.5 flex items-center justify-between shadow-md">
-            <span className="text-[11px] font-mono font-bold text-amber-400 flex items-center gap-1">
-              <span>YOUR BETS:</span>
-            </span>
-            <div className="flex items-center gap-1.5">
-              {Array.from({ length: diceCount }).map((_, idx) => (
-                <div
-                  key={idx}
-                  className={`px-2 py-0.5 rounded-lg border text-xs font-mono flex items-center gap-1 transition-all ${
-                    myCleared[idx]
-                      ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-sm shadow-emerald-500/30'
-                      : 'bg-slate-900 border-slate-800 text-slate-300'
-                  }`}
-                >
-                  <span className="text-[9px] text-slate-500">#{idx + 1}:</span>
-                  <span className="font-black text-amber-300">{myGuesses ? myGuesses[idx] : selectedBets[idx]}</span>
-                  {myCleared[idx] && <CheckCircle2 className="w-3 h-3 text-emerald-400 stroke-[3]" />}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Giant Craps Shoot Button */}
-          {gameState.phase === 'rolling' && (
-            <div className="w-full pt-0.5">
-              {isMyTurn ? (
-                <button
-                  onClick={handleRollDice}
-                  className="w-full h-14 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:brightness-110 active:scale-95 text-slate-950 font-black font-['Outfit'] text-lg flex items-center justify-center gap-2.5 shadow-xl shadow-amber-500/40 transition-all cursor-pointer"
-                >
-                  <Dices className="w-6 h-6 animate-bounce" />
-                  <span>🎲 SHOOT THE CRAPS DICE! (ROLL)</span>
-                </button>
-              ) : (
-                <div className="w-full h-14 rounded-2xl bg-slate-900/90 border-2 border-slate-700 flex items-center justify-center gap-2 text-cyan-300 font-mono text-sm font-bold shadow-md">
-                  <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
-                  <span>{isBotPlaying ? 'CyberBot is shooting the dice...' : 'Waiting for opponent to shoot...'}</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Round Over Victory Celebration */}
-          {gameState.phase === 'round_end' && gameState.roundWinnerUid && (
-            <div className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-600 border-2 border-amber-300 text-slate-950 flex flex-col items-center justify-center gap-1 shadow-2xl animate-fade-in text-center">
-              <Trophy className="w-8 h-8 text-slate-950 animate-bounce" />
-              <h3 className="text-xl font-black font-['Outfit']">
-                {gameState.roundWinnerUid === playerUid
-                  ? '🎉 JACKPOT! YOU WON THE ROUND!'
-                  : `👑 ${room.players[gameState.roundWinnerUid]?.nickname || 'OPPONENT'} WINS!`}
-              </h3>
-              <p className="text-[11px] font-mono font-bold text-slate-900">
-                All bets cleared! Next round begins in 2 seconds...
-              </p>
-            </div>
-          )}
+      {/* 7. Round Over Celebration Banner */}
+      {gameState?.phase === 'round_end' && gameState.roundWinnerUid && (
+        <div className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-600 border-2 border-amber-300 text-slate-950 flex flex-col items-center justify-center gap-1 shadow-2xl animate-fade-in text-center">
+          <Trophy className="w-8 h-8 text-slate-950 animate-bounce" />
+          <h3 className="text-xl font-black font-['Outfit']">
+            {gameState.roundWinnerUid === playerUid
+              ? '🎉 JACKPOT! YOU WON THE ROUND!'
+              : `👑 ${room.players[gameState.roundWinnerUid]?.nickname || 'OPPONENT'} WINS!`}
+          </h3>
+          <p className="text-[11px] font-mono font-bold text-slate-900">
+            All targets cleared! Next round begins in 2 seconds...
+          </p>
         </div>
       )}
-
-      {/* Footer */}
-      <p className="text-[10px] text-slate-400 font-mono text-center">
-        🎰 Vegas High Roller Craps • 3D acrylic dice tumble against the diamond rubber bumpers!
-      </p>
     </div>
   );
 };
