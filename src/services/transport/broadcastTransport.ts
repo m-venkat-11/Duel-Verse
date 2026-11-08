@@ -780,7 +780,7 @@ export class BroadcastTransport implements IRoomTransport {
       // --- Lucky Dice Clash ---
       case 'LUCKY_DICE_SET_COUNT': {
         const { diceCount } = payload;
-        room.gameState = setLuckyDiceCount(room.gameState, diceCount);
+        room.gameState = setLuckyDiceCount(room.gameState, diceCount, playerUids);
         break;
       }
 

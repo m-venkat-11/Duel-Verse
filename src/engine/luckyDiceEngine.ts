@@ -44,17 +44,25 @@ export function createLuckyDiceInitialState(
   };
 }
 
-export function setLuckyDiceCount(state: LuckyDiceState, diceCount: number): LuckyDiceState {
+export function setLuckyDiceCount(
+  state: LuckyDiceState,
+  diceCount: number,
+  playerUids: string[] = []
+): LuckyDiceState {
   const clamped = Math.max(1, Math.min(5, diceCount));
   const initialRoll = Array.from({ length: clamped }, () => Math.floor(Math.random() * 6) + 1);
 
   const newGuesses: Record<string, number[]> = {};
   const newCleared: Record<string, boolean[]> = {};
 
-  Object.keys(state.guesses).forEach((uid) => {
+  const uids = Array.from(new Set([...Object.keys(state.guesses), ...playerUids]));
+  if (uids.length === 0) uids.push('player', 'bot_rival');
+  if (uids.length === 1) uids.push(uids[0] === 'bot_rival' ? 'player' : 'bot_rival');
+
+  uids.forEach((uid, pIdx) => {
     const existing = state.guesses[uid] || [];
     const updated = [...existing];
-    while (updated.length < clamped) updated.push(Math.floor(Math.random() * 6) + 1);
+    while (updated.length < clamped) updated.push(((pIdx * 2 + updated.length) % 6) + 1);
     newGuesses[uid] = updated.slice(0, clamped);
     newCleared[uid] = new Array(clamped).fill(false);
   });
@@ -64,7 +72,9 @@ export function setLuckyDiceCount(state: LuckyDiceState, diceCount: number): Luc
     diceCount: clamped,
     guesses: newGuesses,
     cleared: newCleared,
-    currentRoll: initialRoll
+    currentRoll: initialRoll,
+    roundWinnerUid: null,
+    rollCount: 0
   };
 }
 

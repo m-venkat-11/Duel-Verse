@@ -148,7 +148,26 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
   // Dice simulation state
   const diceRef = useRef<PhysicalCasinoDie[]>([]);
   const isRollingRef = useRef<boolean>(false);
-  const lastRollAnnouncement = useRef<string | null>(null);
+  const [isRolling, setIsRolling] = useState<boolean>(false);
+
+  // PREVENT PREMATURE REVEAL:
+  // Results (rolled numbers, cleared checks, round winner) are strictly revealed ONLY AFTER the dice land!
+  const [displayedCleared, setDisplayedCleared] = useState<Record<string, boolean[]>>(() => gameState?.cleared || {});
+  const [displayedWinner, setDisplayedWinner] = useState<string | null>(null);
+  const [rollAnnouncement, setRollAnnouncement] = useState<string | null>(null);
+
+  const latestGameStateRef = useRef(gameState);
+  useEffect(() => {
+    latestGameStateRef.current = gameState;
+  }, [gameState]);
+
+  // Sync displayedCleared on clean state reset (e.g. next round or dice count change)
+  useEffect(() => {
+    if (!isRollingRef.current && gameState?.cleared) {
+      setDisplayedCleared(gameState.cleared);
+      setDisplayedWinner(gameState.roundWinnerUid || null);
+    }
+  }, [gameState?.cleared, gameState?.diceCount, gameState?.phase]);
 
   const W = 460;
   const H = 380;
@@ -162,7 +181,6 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
     if (count === 1) return [{ x: 230, y: 195 }];
     if (count === 2) return [{ x: 165, y: 195 }, { x: 295, y: 195 }];
     if (count === 3) {
-      // Symmetrical 3-slot Craps row: Slot 1 (Left), Slot 2 (Center), Slot 3 (Right)
       return [
         { x: 120, y: 195 },
         { x: 230, y: 195 },
@@ -224,7 +242,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         vrotX: 0,
         vrotY: 0,
         vrotZ: 0,
-        size: count <= 3 ? 54 : 46,
+        size: count <= 3 ? 54 : count === 4 ? 46 : 40,
         colorType: colors[i % colors.length],
         targetValue: val,
         wallHitTriggered: true,
@@ -244,6 +262,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
   // Launch explosive, cinematic 3D Craps Toss: Launches from player toward back wall, rebounds with sparks, and settles squarely into home pedestals!
   const trigger3DCrapsToss = (targetRoll: number[]) => {
     isRollingRef.current = true;
+    setIsRolling(true);
     soundService.playCountdown(1);
 
     const homes = getHomePositions(diceCount);
@@ -270,10 +289,10 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       die.wallX = TABLE_LEFT + 40 + wallSpread * (idx + 1) + (Math.random() - 0.5) * 16;
       die.wallY = TABLE_TOP + 12;
 
-      // Wild 3D angular tumbling in the air
-      die.vrotX = (Math.random() > 0.5 ? 1 : -1) * (18 + Math.random() * 10);
-      die.vrotY = (Math.random() > 0.5 ? 1 : -1) * (18 + Math.random() * 10);
-      die.vrotZ = (Math.random() > 0.5 ? 1 : -1) * (18 + Math.random() * 10);
+      // Wild 3D angular tumbling in the air (Zero hint of target value until final settle!)
+      die.vrotX = (Math.random() > 0.5 ? 1 : -1) * (18 + Math.random() * 12);
+      die.vrotY = (Math.random() > 0.5 ? 1 : -1) * (18 + Math.random() * 12);
+      die.vrotZ = (Math.random() > 0.5 ? 1 : -1) * (18 + Math.random() * 12);
 
       die.wallHitTriggered = false;
       die.bounce1Triggered = false;
@@ -281,15 +300,40 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
     });
   };
 
+  // Called when all dice have physically settled on their pedestals
+  const handleRollSettled = useRef(() => {
+    isRollingRef.current = false;
+    setIsRolling(false);
+
+    const state = latestGameStateRef.current;
+    if (state) {
+      // 1. Reveal authoritative cleared checkmarks NOW upon landing
+      if (state.cleared) {
+        setDisplayedCleared(state.cleared);
+      }
+      // 2. Reveal authoritative rolled values banner
+      if (state.currentRoll) {
+        const roller = state.lastRolledBy === playerUid ? 'YOU' : p2Nickname;
+        setRollAnnouncement(`${roller} ROLLED: [ ${state.currentRoll.join(' - ')} ]`);
+      }
+      // 3. Reveal round winner celebration if round ended
+      if (state.roundWinnerUid) {
+        setDisplayedWinner(state.roundWinnerUid);
+        soundService.playVictory();
+      }
+    }
+  });
+
   // Listen to roll updates from authoritative room state
   const prevRollCount = useRef<number>(gameState?.rollCount || 0);
   useEffect(() => {
     if (gameState?.rollCount && gameState.rollCount > prevRollCount.current) {
       prevRollCount.current = gameState.rollCount;
       if (gameState.currentRoll) {
+        // Dramatic rolling announcement (numbers are NOT revealed yet!)
+        const roller = gameState.lastRolledBy === playerUid ? 'YOU ARE' : `${p2Nickname.toUpperCase()} IS`;
+        setRollAnnouncement(`🎲 ${roller} SHOOTING THE CRAPS DICE...`);
         trigger3DCrapsToss(gameState.currentRoll);
-        const roller = gameState.lastRolledBy === playerUid ? 'YOU' : p2Nickname;
-        lastRollAnnouncement.current = `${roller} ROLLED: [ ${gameState.currentRoll.join(' - ')} ]`;
       }
     }
   }, [gameState?.rollCount, gameState?.currentRoll, gameState?.lastRolledBy, playerUid, p2Nickname]);
@@ -301,21 +345,14 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       gameState.currentTurn === p2Uid &&
       isBotPlaying &&
       !gameState.roundWinnerUid &&
-      !isRollingRef.current
+      !isRolling
     ) {
       const timer = setTimeout(() => {
         onDispatchActionRef.current('LUCKY_DICE_ROLL', { actingUid: p2Uid });
-      }, 900);
+      }, 950);
       return () => clearTimeout(timer);
     }
-  }, [gameState?.phase, gameState?.currentTurn, p2Uid, isBotPlaying, gameState?.roundWinnerUid]);
-
-  // Victory Sound FX
-  useEffect(() => {
-    if (gameState?.roundWinnerUid) {
-      soundService.playVictory();
-    }
-  }, [gameState?.roundWinnerUid]);
+  }, [gameState?.phase, gameState?.currentTurn, p2Uid, isBotPlaying, gameState?.roundWinnerUid, isRolling]);
 
   // 60 FPS GameLoop for 3D Physics & Matrix-Projected Isometric Rendering
   useEffect(() => {
@@ -348,7 +385,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
             die.y = (1 - p) * (1 - p) * die.startY + 2 * (1 - p) * p * cy + p * p * die.wallY;
             die.z = Math.sin(p * Math.PI) * 125;
 
-            // Fast 3D spin
+            // Fast, unpredictable 3D spin (numbers completely obscured!)
             die.rotX += die.vrotX * clampedDt;
             die.rotY += die.vrotY * clampedDt;
             die.rotZ += die.vrotZ * clampedDt;
@@ -392,13 +429,14 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
                 juice.emitSparks(die.x, die.y, 4, '#f59e0b', '#ffffff', 1.3);
               }
 
-              // Smoothly orient to target face as it settles into pedestal
-              const targetEuler = FACE_ALIGNMENTS[die.targetValue] || [0, 0, 0];
-              if (p > 0.45) {
-                die.rotX += (targetEuler[0] - die.rotX) * Math.min(1, 14 * clampedDt);
-                die.rotY += (targetEuler[1] - die.rotY) * Math.min(1, 14 * clampedDt);
-                die.rotZ += (targetEuler[2] - die.rotZ) * Math.min(1, 14 * clampedDt);
+              // ONLY in the very final settle fraction (p >= 0.85, z < 8px) does it align to target face!
+              if (p >= 0.85) {
+                const targetEuler = FACE_ALIGNMENTS[die.targetValue] || [0, 0, 0];
+                die.rotX += (targetEuler[0] - die.rotX) * Math.min(1, 18 * clampedDt);
+                die.rotY += (targetEuler[1] - die.rotY) * Math.min(1, 18 * clampedDt);
+                die.rotZ += (targetEuler[2] - die.rotZ) * Math.min(1, 18 * clampedDt);
               } else {
+                // Keep tumbling during bounces!
                 die.rotX += die.vrotX * clampedDt * (1 - p);
                 die.rotY += die.vrotY * clampedDt * (1 - p);
                 die.rotZ += die.vrotZ * clampedDt * (1 - p);
@@ -423,7 +461,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
       });
 
       if (allSettled && isRollingRef.current) {
-        isRollingRef.current = false;
+        handleRollSettled.current();
       }
     };
 
@@ -483,8 +521,8 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
 
       // Dedicated Symmetrical Felt Landing Pedestals (Golden Rings on Table)
       const homes = getHomePositions(diceCount);
-      const myTargets = gameState?.guesses?.[playerUid] || [];
-      const oppTargets = gameState?.guesses?.[p2Uid] || [];
+      const myTargets = latestGameStateRef.current?.guesses?.[playerUid] || [];
+      const oppTargets = latestGameStateRef.current?.guesses?.[p2Uid] || [];
 
       homes.forEach((home, idx) => {
         ctx.save();
@@ -492,15 +530,15 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         const isMatchedPlayer = die?.isSettled && myTargets[idx] === die.targetValue;
         const isMatchedBot = die?.isSettled && oppTargets[idx] === die.targetValue;
 
-        // Glow ring if matched
+        // Glow ring if matched upon settling
         if (isMatchedPlayer) {
-          ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
+          ctx.strokeStyle = 'rgba(16, 185, 129, 0.65)';
           ctx.lineWidth = 2.5;
           ctx.beginPath();
           ctx.arc(home.x, home.y + 12, 36, 0, Math.PI * 2);
           ctx.stroke();
         } else if (isMatchedBot) {
-          ctx.strokeStyle = 'rgba(6, 182, 212, 0.6)';
+          ctx.strokeStyle = 'rgba(6, 182, 212, 0.65)';
           ctx.lineWidth = 2.5;
           ctx.beginPath();
           ctx.arc(home.x, home.y + 12, 36, 0, Math.PI * 2);
@@ -745,7 +783,14 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
   }, []);
 
   // Handlers
+  const handleSelectDiceCount = (cnt: number) => {
+    if (isRolling || cnt === diceCount) return;
+    soundService.playCountdown(1);
+    onDispatchActionRef.current('LUCKY_DICE_SET_COUNT', { diceCount: cnt });
+  };
+
   const handleCycleBet = (dieIndex: number) => {
+    if (isRolling) return;
     soundService.playImpact(0.8);
     const existing = myGuesses ? myGuesses[dieIndex] : (dieIndex * 2 + 1) % 6 + 1;
     const nextBet = (existing % 6) + 1; // Cycles 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 1
@@ -764,6 +809,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
   };
 
   const handleRandomizeAllBets = () => {
+    if (isRolling) return;
     soundService.playCountdown(1);
     for (let i = 0; i < diceCount; i++) {
       const rand = Math.floor(Math.random() * 6) + 1;
@@ -781,15 +827,15 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
   };
 
   const handleRollDice = () => {
-    if (isRollingRef.current || gameState?.phase !== 'rolling' || gameState.currentTurn !== playerUid) return;
+    if (isRolling || gameState?.phase !== 'rolling' || gameState.currentTurn !== playerUid) return;
     onDispatchActionRef.current('LUCKY_DICE_ROLL', { actingUid: playerUid });
   };
 
   const myGuesses = gameState?.guesses?.[playerUid] || Array.from({ length: diceCount }, (_, i) => ((i * 2 + 1) % 6) + 1);
-  const myCleared = gameState?.cleared?.[playerUid] || new Array(diceCount).fill(false);
+  const myCleared = displayedCleared[playerUid] || new Array(diceCount).fill(false);
   const oppUid = p1Uid === playerUid ? p2Uid : p1Uid;
   const oppGuesses = gameState?.guesses?.[oppUid] || Array.from({ length: diceCount }, (_, i) => ((i * 2 + 2) % 6) + 1);
-  const oppCleared = gameState?.cleared?.[oppUid] || new Array(diceCount).fill(false);
+  const oppCleared = displayedCleared[oppUid] || new Array(diceCount).fill(false);
 
   const isMyTurn = gameState?.currentTurn === playerUid;
   const p1Score = room.scores[p1Uid] || gameState?.roundScores?.[p1Uid] || 0;
@@ -823,7 +869,33 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         </div>
       </div>
 
-      {/* 2. Unmistakable Turn Announcement Spotlight Bar */}
+      {/* 2. Casino Dice Quantity Selector (1 to 5 Dice) */}
+      <div className="w-full bg-slate-900/90 border border-amber-500/30 rounded-2xl px-3 py-1.5 flex items-center justify-between shadow-xl backdrop-blur-md">
+        <div className="flex items-center gap-1.5">
+          <Dices className="w-4 h-4 text-amber-400" />
+          <span className="text-[11px] font-mono font-black text-amber-300">DICE QUANTITY:</span>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          {[1, 2, 3, 4, 5].map((cnt) => (
+            <button
+              key={cnt}
+              onClick={() => handleSelectDiceCount(cnt)}
+              disabled={isRolling}
+              title={`Play with ${cnt} dice`}
+              className={`w-7 h-7 rounded-xl font-black font-['Outfit'] text-xs flex items-center justify-center transition-all cursor-pointer ${
+                diceCount === cnt
+                  ? 'bg-gradient-to-br from-amber-400 to-yellow-500 text-slate-950 font-black shadow-md shadow-amber-400/50 scale-105 border border-yellow-200'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700'
+              } ${isRolling ? 'opacity-40 cursor-not-allowed' : 'active:scale-95'}`}
+            >
+              {cnt}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 3. Unmistakable Turn Announcement Spotlight Bar */}
       <div
         className={`w-full py-2 px-3 rounded-2xl border-2 flex items-center justify-between shadow-xl transition-all ${
           isMyTurn
@@ -841,7 +913,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         </span>
       </div>
 
-      {/* 3. CyberBot / Opponent Prediction Chips (Above Table) */}
+      {/* 4. CyberBot / Opponent Prediction Chips (Above Table) */}
       <div className="w-full bg-slate-950/90 border border-slate-800/80 rounded-xl px-2.5 py-1.5 flex items-center justify-between shadow-md">
         <span className="text-[11px] font-mono font-bold text-cyan-400">
           {oppUid === playerUid ? 'YOU' : p2Nickname}:
@@ -852,7 +924,7 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
               key={idx}
               className={`px-2.5 py-1 rounded-xl border flex items-center gap-1.5 font-mono transition-all ${
                 oppCleared[idx]
-                  ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-md shadow-emerald-500/30'
+                  ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-md shadow-emerald-500/30 animate-pulse'
                   : 'bg-slate-900 border-slate-800 text-slate-300'
               }`}
             >
@@ -864,19 +936,25 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         </div>
       </div>
 
-      {/* 4. Spacious 3D Vegas Craps Table Canvas (Permanent 60 FPS) */}
+      {/* 5. Spacious 3D Vegas Craps Table Canvas (Permanent 60 FPS) */}
       <div className="w-full h-[38vh] min-h-[260px] max-h-[360px] aspect-[460/380] rounded-3xl overflow-hidden shadow-2xl border-4 border-amber-900/60 relative bg-[#01120b]">
         <canvas ref={canvasRef} className="w-full h-full block select-none" />
 
-        {/* Live Roll Callout Banner on Table */}
-        {lastRollAnnouncement.current && (
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-slate-950/95 border border-amber-500/40 px-3 py-1 rounded-full text-[10px] font-mono text-amber-300 font-bold shadow-xl pointer-events-none whitespace-nowrap">
-            {lastRollAnnouncement.current}
+        {/* Live Roll Callout Banner on Table (Hidden while rolling; reveals only on settle!) */}
+        {rollAnnouncement && (
+          <div
+            className={`absolute bottom-2 left-1/2 -translate-x-1/2 px-3.5 py-1 rounded-full text-[10px] font-mono font-bold shadow-2xl pointer-events-none whitespace-nowrap border transition-all ${
+              isRolling
+                ? 'bg-slate-950/95 border-amber-400/50 text-amber-300 animate-pulse'
+                : 'bg-amber-950/95 border-amber-400 text-amber-200 shadow-amber-500/40 scale-105'
+            }`}
+          >
+            {rollAnnouncement}
           </div>
         )}
       </div>
 
-      {/* 5. Player's Prediction Chips (Spacious & Interactive) */}
+      {/* 6. Player's Prediction Chips (Spacious & Interactive) */}
       <div className="w-full bg-slate-950/90 border-2 border-amber-500/30 rounded-2xl p-2.5 flex items-center justify-between shadow-lg">
         <div className="flex flex-col">
           <span className="text-[11px] font-mono font-black text-amber-400">YOUR TARGETS:</span>
@@ -888,11 +966,12 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
             <button
               key={idx}
               onClick={() => handleCycleBet(idx)}
+              disabled={isRolling}
               className={`px-3 py-1.5 rounded-xl border-2 flex items-center gap-1.5 font-mono active:scale-95 transition-all cursor-pointer ${
                 myCleared[idx]
-                  ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-md shadow-emerald-500/40'
+                  ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-md shadow-emerald-500/40 animate-pulse'
                   : 'bg-slate-900 border-amber-400/60 text-white hover:border-amber-400'
-              }`}
+              } ${isRolling ? 'opacity-70 cursor-not-allowed' : ''}`}
               title="Click to cycle lucky number"
             >
               <span className="text-[10px] text-amber-400/80">#{idx + 1}</span>
@@ -908,7 +987,10 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
           {/* Quick Randomize Button */}
           <button
             onClick={handleRandomizeAllBets}
-            className="p-2 rounded-xl bg-slate-900 border border-slate-700 hover:border-amber-400 text-slate-300 hover:text-white active:scale-95 transition"
+            disabled={isRolling}
+            className={`p-2 rounded-xl bg-slate-900 border border-slate-700 hover:border-amber-400 text-slate-300 hover:text-white active:scale-95 transition cursor-pointer ${
+              isRolling ? 'opacity-40 cursor-not-allowed' : ''
+            }`}
             title="Randomize all lucky targets"
           >
             <RefreshCw className="w-4 h-4 text-cyan-400" />
@@ -916,9 +998,14 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         </div>
       </div>
 
-      {/* 6. Giant Tactile Arcade Spin / Roll Button */}
+      {/* 7. Giant Tactile Arcade Spin / Roll Button */}
       <div className="w-full pt-0.5">
-        {isMyTurn ? (
+        {isRolling ? (
+          <div className="w-full h-14 rounded-2xl bg-amber-500/20 border-2 border-amber-400/60 flex items-center justify-center gap-2.5 text-amber-300 font-mono font-bold text-sm shadow-xl shadow-amber-500/20 animate-pulse">
+            <RefreshCw className="w-5 h-5 animate-spin text-amber-400" />
+            <span>🎲 CRAPS DICE TUMBLING ON TABLE...</span>
+          </div>
+        ) : isMyTurn ? (
           <button
             onClick={handleRollDice}
             className="w-full h-14 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:brightness-110 active:scale-95 text-slate-950 font-black font-['Outfit'] text-lg flex items-center justify-center gap-2.5 shadow-xl shadow-amber-500/40 transition-all cursor-pointer"
@@ -934,14 +1021,14 @@ export const LuckyDiceView: React.FC<LuckyDiceViewProps> = ({ room, playerUid, o
         )}
       </div>
 
-      {/* 7. Round Over Celebration Banner */}
-      {gameState?.phase === 'round_end' && gameState.roundWinnerUid && (
+      {/* 8. Round Over Celebration Banner (Revealed ONLY after dice settle!) */}
+      {!isRolling && displayedWinner && (
         <div className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-600 border-2 border-amber-300 text-slate-950 flex flex-col items-center justify-center gap-1 shadow-2xl animate-fade-in text-center">
           <Trophy className="w-8 h-8 text-slate-950 animate-bounce" />
           <h3 className="text-xl font-black font-['Outfit']">
-            {gameState.roundWinnerUid === playerUid
+            {displayedWinner === playerUid
               ? '🎉 JACKPOT! YOU WON THE ROUND!'
-              : `👑 ${room.players[gameState.roundWinnerUid]?.nickname || 'OPPONENT'} WINS!`}
+              : `👑 ${room.players[displayedWinner]?.nickname || 'OPPONENT'} WINS!`}
           </h3>
           <p className="text-[11px] font-mono font-bold text-slate-900">
             All targets cleared! Next round begins in 2 seconds...
