@@ -532,7 +532,36 @@ export class BroadcastTransport implements IRoomTransport {
         break;
       }
 
-      // --- Tank Duel Kill ---
+      // --- Tank Duel Live Sync & Kills ---
+      case 'TANK_SYNC': {
+        if (!room.gameState) room.gameState = {};
+        if (!room.gameState.tanks) room.gameState.tanks = {};
+        room.gameState.tanks[playerUid] = {
+          x: payload.x,
+          y: payload.y,
+          angle: payload.angle,
+          turretAngle: payload.turretAngle,
+          hp: payload.hp,
+          alive: payload.alive,
+          updatedAt: Date.now()
+        };
+        break;
+      }
+
+      case 'TANK_FIRE': {
+        if (!room.gameState) room.gameState = {};
+        room.gameState.lastShot = {
+          id: payload.id,
+          ownerUid: playerUid,
+          x: payload.x,
+          y: payload.y,
+          vx: payload.vx,
+          vy: payload.vy,
+          timestamp: Date.now()
+        };
+        break;
+      }
+
       case 'TANK_KILL':
       case 'TANK_HIT': {
         const { killerUid, victimUid } = payload;
@@ -789,15 +818,30 @@ export class BroadcastTransport implements IRoomTransport {
         break;
       }
 
-      // --- Sumo Spinners Ring Out ---
+      // --- Sumo Spinners Live Sync & Ring Out ---
+      case 'SUMO_SYNC': {
+        if (!room.gameState) room.gameState = {};
+        if (!room.gameState.spinners) room.gameState.spinners = {};
+        room.gameState.spinners[playerUid] = {
+          x: payload.x,
+          y: payload.y,
+          vx: payload.vx,
+          vy: payload.vy,
+          spinRpm: payload.spinRpm,
+          alive: payload.alive,
+          updatedAt: Date.now()
+        };
+        break;
+      }
+
       case 'SUMO_RING_OUT': {
         const { fallenUid } = payload;
-        const res = registerSumoRingOut(room.gameState, fallenUid);
+        const targetScore = room.maxRounds || room.gameState?.targetScore || 3;
+        const res = registerSumoRingOut(room.gameState, fallenUid, targetScore);
         room.gameState = res.newState;
 
         if (res.winnerUid && room.players[res.winnerUid]) {
           room.scores[res.winnerUid] = (room.scores[res.winnerUid] || 0) + 1;
-          const targetScore = room.maxRounds || room.gameState?.targetScore || 3;
           if (res.matchOver || room.scores[res.winnerUid] >= targetScore) {
             room.status = 'match_end';
             room.matchWinnerUid = res.matchWinnerUid || res.winnerUid;

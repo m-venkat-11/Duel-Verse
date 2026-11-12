@@ -34,7 +34,8 @@ export function createSumoSpinInitialState(playerUids: string[], targetScore: nu
 
 export function registerSumoRingOut(
   state: SumoSpinState,
-  fallenUid: string
+  fallenUid: string,
+  overrideTargetScore?: number
 ): {
   newState: SumoSpinState;
   winnerUid: string;
@@ -49,7 +50,8 @@ export function registerSumoRingOut(
     [victorUid]: (state.scores[victorUid] || 0) + 1
   };
 
-  const matchOver = nextScores[victorUid] >= state.targetScore;
+  const goal = overrideTargetScore || state.targetScore || 3;
+  const matchOver = nextScores[victorUid] >= goal;
 
   return {
     newState: {

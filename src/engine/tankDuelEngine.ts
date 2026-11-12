@@ -9,6 +9,7 @@ export interface TankDuelState {
     y: number;
     angle: number;
     turretAngle: number;
+    hp?: number;
     alive: boolean;
   }>;
 }

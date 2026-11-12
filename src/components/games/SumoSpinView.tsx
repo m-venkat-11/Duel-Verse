@@ -7,9 +7,9 @@ import { CanvasManager } from '../../engine/core/CanvasManager';
 import { JuiceEngine } from '../../engine/core/JuiceEngine';
 
 interface SumoSpinViewProps {
-  room: AuthoritativeRoomState;
+  room: AuthoritativeRoomState<SumoSpinState>;
   playerUid: string;
-  onDispatchAction: (type: string, payload?: any) => void;
+  onDispatchAction: (type: string, payload: any) => void;
 }
 
 interface Shockwave {
@@ -32,51 +32,81 @@ interface FallAnim {
   color: string;
 }
 
+interface SpinOrb {
+  x: number;
+  y: number;
+  type: 'rpm' | 'titan';
+  pulse: number;
+}
+
+interface GhostTrail {
+  x: number;
+  y: number;
+  angle: number;
+  alpha: number;
+  color: string;
+}
+
 const ARENA_CX = 240;
 const ARENA_CY = 240;
-const ARENA_R = 175;
-const SPINNER_R = 27;
+const BASE_ARENA_R = 178;
+const SPINNER_R = 26;
+
+const KINETIC_POSTS = [
+  { x: ARENA_CX, y: ARENA_CY - 82, r: 13, flash: 0 },
+  { x: ARENA_CX, y: ARENA_CY + 82, r: 13, flash: 0 },
+];
 
 const createFreshSpinners = (p1Uid: string, p2Uid: string): Record<string, SumoSpinner> => ({
   [p1Uid]: {
-    x: ARENA_CX - 90,
+    x: ARENA_CX - 96,
     y: ARENA_CY,
     vx: 0,
     vy: 0,
     angle: 0,
-    spinRpm: 1650,
+    spinRpm: 1800,
     alive: true,
     boostCooldown: 0,
   },
   [p2Uid]: {
-    x: ARENA_CX + 90,
+    x: ARENA_CX + 96,
     y: ARENA_CY,
     vx: 0,
     vy: 0,
     angle: Math.PI,
-    spinRpm: 1650,
+    spinRpm: 1800,
     alive: true,
     boostCooldown: 0,
   },
 });
 
 export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onDispatchAction }) => {
-  const gameState = room.gameState as SumoSpinState;
+  const gameState = room.gameState;
   const players = Object.keys(room.players);
   const p1Uid = players[0] || playerUid;
   const p2Uid = players[1] || (p1Uid === 'bot_rival' ? 'player' : 'bot_rival');
 
-  const isHost = playerUid === p1Uid;
+  const isHost = room.hostUid === playerUid || playerUid === p1Uid;
   const isP1Local = playerUid === p1Uid;
-  const isBotPlaying = Boolean(room.players['bot_rival'] || p2Uid === 'bot_rival' || p2Uid.startsWith('bot_') || players.length < 2);
+  const isBotPlaying = Boolean(
+    room.players['bot_rival'] || p2Uid === 'bot_rival' || p2Uid.startsWith('bot_') || players.length < 2
+  );
 
   const p1Nickname = room.players[p1Uid]?.nickname || 'Player 1';
   const p2Nickname = room.players[p2Uid]?.nickname || (isBotPlaying ? 'CyberBot' : 'Player 2');
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const juiceRef = useRef(new JuiceEngine());
+  const juiceRef = useRef(new JuiceEngine(420));
   const keysRef = useRef<Record<string, boolean>>({});
-  const pointerStickRef = useRef<{ active: boolean; dx: number; dy: number; originX: number; originY: number; curX: number; curY: number }>({
+  const pointerStickRef = useRef<{
+    active: boolean;
+    dx: number;
+    dy: number;
+    originX: number;
+    originY: number;
+    curX: number;
+    curY: number;
+  }>({
     active: false,
     dx: 0,
     dy: 0,
@@ -88,12 +118,19 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
 
   const spinnersRef = useRef<Record<string, SumoSpinner>>(createFreshSpinners(p1Uid, p2Uid));
   const dashTimerRef = useRef<Record<string, number>>({ [p1Uid]: 0, [p2Uid]: 0 });
+  const titanTimerRef = useRef<Record<string, number>>({ [p1Uid]: 0, [p2Uid]: 0 });
+  const trailsRef = useRef<Record<string, Array<{ x: number; y: number }>>>({ [p1Uid]: [], [p2Uid]: [] });
+  const ghostsRef = useRef<GhostTrail[]>([]);
+  const orbsRef = useRef<SpinOrb[]>([]);
   const shockwavesRef = useRef<Shockwave[]>([]);
   const fallsRef = useRef<FallAnim[]>([]);
+  const currentRadiusRef = useRef(BASE_ARENA_R);
+  const elapsedRoundRef = useRef(0);
+  const orbSpawnTimerRef = useRef(3.2);
   const roundResolvedRef = useRef(false);
   const prevRoundRef = useRef(room.currentRound);
 
-  // Ref mirrors so GameLoop never restarts on state updates
+  // Ref mirrors so GameLoop never restarts on stateVersion updates
   const onDispatchActionRef = useRef(onDispatchAction);
   onDispatchActionRef.current = onDispatchAction;
   const gameStateRef = useRef(gameState);
@@ -104,8 +141,9 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
   botDifficultyRef.current = room.gameConfig?.difficulty || 'medium';
 
   const [boostCdPct, setBoostCdPct] = useState(0);
-  const [p1RpmUi, setP1RpmUi] = useState(1650);
-  const [p2RpmUi, setP2RpmUi] = useState(1650);
+  const [p1RpmUi, setP1RpmUi] = useState(1800);
+  const [p2RpmUi, setP2RpmUi] = useState(1800);
+  const [shrinkWarning, setShrinkWarning] = useState(false);
 
   // Reset positions cleanly on round transition
   useEffect(() => {
@@ -114,10 +152,75 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
       roundResolvedRef.current = false;
       spinnersRef.current = createFreshSpinners(p1Uid, p2Uid);
       dashTimerRef.current = { [p1Uid]: 0, [p2Uid]: 0 };
+      titanTimerRef.current = { [p1Uid]: 0, [p2Uid]: 0 };
+      trailsRef.current = { [p1Uid]: [], [p2Uid]: [] };
+      ghostsRef.current = [];
+      orbsRef.current = [];
       fallsRef.current = [];
       shockwavesRef.current = [];
+      currentRadiusRef.current = BASE_ARENA_R;
+      elapsedRoundRef.current = 0;
+      orbSpawnTimerRef.current = 3.0;
+      setShrinkWarning(false);
     }
   }, [room.currentRound, gameState?.roundWinner, p1Uid, p2Uid]);
+
+  const computeAimVector = (uid: string): { x: number; y: number } => {
+    const s = spinnersRef.current[uid];
+    const oppUid = uid === p1Uid ? p2Uid : p1Uid;
+    const opp = spinnersRef.current[oppUid];
+    if (!s) return { x: 1, y: 0 };
+
+    let dx = 0;
+    let dy = 0;
+    if (uid === playerUid) {
+      if (keysRef.current['ArrowUp'] || keysRef.current['KeyW']) dy -= 1;
+      if (keysRef.current['ArrowDown'] || keysRef.current['KeyS']) dy += 1;
+      if (keysRef.current['ArrowLeft'] || keysRef.current['KeyA']) dx -= 1;
+      if (keysRef.current['ArrowRight'] || keysRef.current['KeyD']) dx += 1;
+      if (dx === 0 && dy === 0 && pointerStickRef.current.active) {
+        dx = pointerStickRef.current.dx;
+        dy = pointerStickRef.current.dy;
+      }
+    }
+
+    if (Math.hypot(dx, dy) < 0.08 && opp && opp.alive) {
+      dx = opp.x - s.x;
+      dy = opp.y - s.y;
+    }
+
+    const len = Math.hypot(dx, dy) || 1;
+    return { x: dx / len, y: dy / len };
+  };
+
+  const triggerDash = (uid: string) => {
+    const gs = gameStateRef.current;
+    if (roomStatusRef.current !== 'playing' || roundResolvedRef.current || gs?.roundWinner) return;
+
+    const s = spinnersRef.current[uid];
+    if (!s || !s.alive || s.boostCooldown > 0) return;
+
+    const dir = computeAimVector(uid);
+    const dashSpeed = 14.2 + (titanTimerRef.current[uid] > 0 ? 2.2 : 0);
+    s.vx += dir.x * dashSpeed;
+    s.vy += dir.y * dashSpeed;
+    s.boostCooldown = 2.1;
+    s.spinRpm = Math.min(2800, s.spinRpm + 260);
+    dashTimerRef.current[uid] = 0.28;
+
+    const col = uid === p1Uid ? '#fbbf24' : '#38bdf8';
+    juiceRef.current.addTrauma(0.16);
+    juiceRef.current.emitSparks(s.x, s.y, 16, col, '#ffffff', 5);
+    shockwavesRef.current.push({
+      x: s.x,
+      y: s.y,
+      r: SPINNER_R * 0.7,
+      maxR: SPINNER_R * 2.7,
+      alpha: 0.85,
+      color: col,
+    });
+    soundService.playClick();
+  };
 
   // Keyboard bindings
   useEffect(() => {
@@ -139,58 +242,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
     };
   });
 
-  const triggerDash = (uid: string) => {
-    const gs = gameStateRef.current;
-    if (roomStatusRef.current !== 'playing' || roundResolvedRef.current || gs?.roundWinner) return;
-
-    const s = spinnersRef.current[uid];
-    if (!s || !s.alive || s.boostCooldown > 0) return;
-
-    const oppUid = uid === p1Uid ? p2Uid : p1Uid;
-    const opp = spinnersRef.current[oppUid];
-
-    let dx = 0;
-    let dy = 0;
-
-    if (uid === playerUid) {
-      if (keysRef.current['ArrowUp'] || keysRef.current['KeyW']) dy -= 1;
-      if (keysRef.current['ArrowDown'] || keysRef.current['KeyS']) dy += 1;
-      if (keysRef.current['ArrowLeft'] || keysRef.current['KeyA']) dx -= 1;
-      if (keysRef.current['ArrowRight'] || keysRef.current['KeyD']) dx += 1;
-
-      if (dx === 0 && dy === 0 && pointerStickRef.current.active) {
-        dx = pointerStickRef.current.dx;
-        dy = pointerStickRef.current.dy;
-      }
-    }
-
-    // If stationary or bot, lock directly onto opponent spinner so Slam Dash always attacks!
-    const inputMag = Math.hypot(dx, dy);
-    if (inputMag < 0.08 && opp && opp.alive) {
-      dx = opp.x - s.x;
-      dy = opp.y - s.y;
-    }
-
-    const len = Math.hypot(dx, dy) || 1;
-    s.vx += (dx / len) * 12.5;
-    s.vy += (dy / len) * 12.5;
-    s.boostCooldown = 2.6;
-    s.spinRpm = Math.min(2600, s.spinRpm + 240);
-    dashTimerRef.current[uid] = 0.25;
-
-    juiceRef.current.emitSparks(s.x, s.y, 14, uid === p1Uid ? '#fbbf24' : '#38bdf8');
-    shockwavesRef.current.push({
-      x: s.x,
-      y: s.y,
-      r: SPINNER_R * 0.7,
-      maxR: SPINNER_R * 2.4,
-      alpha: 0.75,
-      color: uid === p1Uid ? '#fbbf24' : '#38bdf8',
-    });
-    soundService.playClick();
-  };
-
-  // Ref-stabilized 60 FPS Physics & Stadium Renderer
+  // Ref-stabilized 60 FPS Stadium Loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -198,112 +250,152 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
     const W = 480;
     const H = 480;
     let hudTick = 0;
+    let syncTick = 0;
 
     const drawTopSpinner = (
       ctx: CanvasRenderingContext2D,
+      uid: string,
       s: SumoSpinner,
       primary: string,
       glow: string,
       core: string,
-      isDashing: boolean
+      isDashing: boolean,
+      isTitan: boolean
     ) => {
       if (!s.alive) return;
+
+      // Speed Ribbon Trail
+      const trail = trailsRef.current[uid] || [];
+      if (trail.length > 1) {
+        ctx.save();
+        for (let i = 1; i < trail.length; i++) {
+          ctx.strokeStyle = glow;
+          ctx.globalAlpha = (i / trail.length) * (isDashing ? 0.55 : 0.25);
+          ctx.lineWidth = (i / trail.length) * (isTitan ? 14 : 9);
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+          ctx.lineTo(trail[i].x, trail[i].y);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      const drawScale = isTitan ? 1.15 : 1.0;
+
       ctx.save();
       ctx.translate(s.x, s.y);
+      ctx.scale(drawScale, drawScale);
 
       const speedMag = Math.hypot(s.vx, s.vy);
-      const rpmRatio = Math.min(1.4, Math.max(0.4, s.spinRpm / 1650));
+      const rpmRatio = Math.min(1.5, Math.max(0.45, s.spinRpm / 1800));
 
       // Ground Drop Shadow
-      ctx.fillStyle = 'rgba(0,0,0,0.48)';
+      ctx.fillStyle = 'rgba(0,0,0,0.52)';
       ctx.beginPath();
-      ctx.ellipse(4, 7, SPINNER_R * 0.96, SPINNER_R * 0.96, 0, 0, Math.PI * 2);
+      ctx.ellipse(4, 8, SPINNER_R * 0.96, SPINNER_R * 0.96, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // High-RPM Energy Aura Ring
+      // Aim Chevron Indicator for Local Player when Dash Ready
+      if (uid === playerUid && s.boostCooldown <= 0) {
+        const aim = computeAimVector(uid);
+        const aimAng = Math.atan2(aim.y, aim.x);
+        ctx.save();
+        ctx.rotate(aimAng);
+        ctx.fillStyle = primary;
+        ctx.globalAlpha = 0.72;
+        ctx.beginPath();
+        ctx.moveTo(SPINNER_R + 14, 0);
+        ctx.lineTo(SPINNER_R + 4, -6);
+        ctx.lineTo(SPINNER_R + 7, 0);
+        ctx.lineTo(SPINNER_R + 4, 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // High-RPM / Titan Plasma Ring
       ctx.save();
-      ctx.strokeStyle = glow;
-      ctx.globalAlpha = isDashing ? 0.9 : 0.28 * rpmRatio;
-      ctx.lineWidth = isDashing ? 4 : 2;
-      ctx.setLineDash([10, 6]);
-      ctx.rotate(-s.angle * 0.6);
+      ctx.strokeStyle = isTitan ? '#f43f5e' : glow;
+      ctx.globalAlpha = isDashing || isTitan ? 0.9 : 0.35 * rpmRatio;
+      ctx.lineWidth = isDashing || isTitan ? 4 : 2;
+      ctx.setLineDash([9, 5]);
+      ctx.rotate(-s.angle * 0.75);
       ctx.beginPath();
       ctx.arc(0, 0, SPINNER_R + (isDashing ? 8 : 5), 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
 
-      // Rotating Multi-Blade Attack Chassis
+      // Rotating 6-Blade Razor Fusion Wheel
       ctx.save();
       ctx.rotate(s.angle);
 
-      // 4 Curved Attack Fins
-      ctx.shadowColor = glow;
-      ctx.shadowBlur = isDashing ? 18 : 10;
-      ctx.fillStyle = '#1e293b';
-      ctx.strokeStyle = primary;
+      ctx.shadowColor = isTitan ? '#f43f5e' : glow;
+      ctx.shadowBlur = isDashing || isTitan ? 20 : 12;
+      ctx.fillStyle = '#0f172a';
+      ctx.strokeStyle = isTitan ? '#fb7185' : primary;
       ctx.lineWidth = 2;
-      for (let k = 0; k < 4; k++) {
+
+      for (let k = 0; k < 6; k++) {
         ctx.save();
-        ctx.rotate((k * Math.PI) / 2);
+        ctx.rotate((k * Math.PI) / 3);
         ctx.beginPath();
-        ctx.moveTo(8, -SPINNER_R + 4);
-        ctx.quadraticCurveTo(SPINNER_R + 3, -6, SPINNER_R - 3, 12);
-        ctx.lineTo(10, 6);
+        ctx.moveTo(7, -SPINNER_R + 2);
+        ctx.quadraticCurveTo(SPINNER_R + 4, -4, SPINNER_R - 2, 10);
+        ctx.lineTo(9, 5);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
         ctx.restore();
       }
 
-      // Outer Armored Weight Disk
-      const diskGrad = ctx.createRadialGradient(-5, -5, 4, 0, 0, SPINNER_R - 4);
-      diskGrad.addColorStop(0, '#94a3b8');
-      diskGrad.addColorStop(0.55, '#334155');
-      diskGrad.addColorStop(1, '#0f172a');
+      // Heavy Forged Energy Ring
+      const diskGrad = ctx.createRadialGradient(-5, -5, 3, 0, 0, SPINNER_R - 4);
+      diskGrad.addColorStop(0, '#e2e8f0');
+      diskGrad.addColorStop(0.5, '#334155');
+      diskGrad.addColorStop(1, '#020617');
       ctx.fillStyle = diskGrad;
       ctx.beginPath();
-      ctx.arc(0, 0, SPINNER_R - 4, 0, Math.PI * 2);
+      ctx.arc(0, 0, SPINNER_R - 5, 0, Math.PI * 2);
       ctx.fill();
 
-      // Inner Glow Bit-Chip
       ctx.strokeStyle = primary;
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.arc(0, 0, SPINNER_R - 10, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Center Turbo Core
+      // Bit-Beast Glowing Core
       const coreGrad = ctx.createRadialGradient(-2, -2, 1, 0, 0, 10);
       coreGrad.addColorStop(0, '#ffffff');
-      coreGrad.addColorStop(0.4, core);
+      coreGrad.addColorStop(0.45, core);
       coreGrad.addColorStop(1, '#0f172a');
       ctx.fillStyle = coreGrad;
       ctx.beginPath();
       ctx.arc(0, 0, 9.5, 0, Math.PI * 2);
       ctx.fill();
 
-      // Spinning Direction Crosshair
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 1.6;
       ctx.beginPath();
-      ctx.moveTo(-6, 0);
-      ctx.lineTo(6, 0);
-      ctx.moveTo(0, -6);
-      ctx.lineTo(0, 6);
+      ctx.moveTo(-5.5, 0);
+      ctx.lineTo(5.5, 0);
+      ctx.moveTo(0, -5.5);
+      ctx.lineTo(0, 5.5);
       ctx.stroke();
 
       ctx.restore();
 
-      // Dash motion blur crescent
+      // High-Speed Impact Wake Crescent
       if (speedMag > 4 || isDashing) {
         const moveAng = Math.atan2(s.vy, s.vx);
         ctx.save();
         ctx.rotate(moveAng);
         ctx.strokeStyle = primary;
-        ctx.globalAlpha = 0.45;
-        ctx.lineWidth = 3;
+        ctx.globalAlpha = 0.55;
+        ctx.lineWidth = 3.2;
         ctx.beginPath();
-        ctx.arc(0, 0, SPINNER_R + 3, Math.PI * 0.65, Math.PI * 1.35);
+        ctx.arc(0, 0, SPINNER_R + 4, Math.PI * 0.65, Math.PI * 1.35);
         ctx.stroke();
         ctx.restore();
       }
@@ -321,15 +413,22 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
         const s1 = spinnersRef.current[p1Uid];
         const s2 = spinnersRef.current[p2Uid];
 
-        // Update Shockwaves
+        for (const post of KINETIC_POSTS) {
+          post.flash = Math.max(0, post.flash - dt * 4);
+        }
+
         for (let i = shockwavesRef.current.length - 1; i >= 0; i--) {
           const sw = shockwavesRef.current[i];
           sw.r += (sw.maxR - sw.r) * Math.min(1, dt * 12);
-          sw.alpha -= dt * 2.4;
+          sw.alpha -= dt * 2.5;
           if (sw.alpha <= 0) shockwavesRef.current.splice(i, 1);
         }
 
-        // Update Ring-Out Fall Spiral Animations
+        for (let i = ghostsRef.current.length - 1; i >= 0; i--) {
+          ghostsRef.current[i].alpha -= dt * 3.5;
+          if (ghostsRef.current[i].alpha <= 0) ghostsRef.current.splice(i, 1);
+        }
+
         for (let i = fallsRef.current.length - 1; i >= 0; i--) {
           const f = fallsRef.current[i];
           f.x += f.vx * step * 0.65;
@@ -345,18 +444,61 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
         }
         if (!s1 || !s2) return;
 
-        // Tick cooldowns & visual spin angles
+        // Track round duration -> trigger gradual shrinking hazard ring after 13s!
+        elapsedRoundRef.current += dt;
+        if (elapsedRoundRef.current > 13) {
+          currentRadiusRef.current = Math.max(114, currentRadiusRef.current - dt * 6.5);
+        }
+
+        // Spawn Spin Cores & Titan Orbs
+        orbSpawnTimerRef.current -= dt;
+        if (orbSpawnTimerRef.current <= 0 && orbsRef.current.length < 2) {
+          orbSpawnTimerRef.current = 4.2 + Math.random() * 2.2;
+          const ang = Math.random() * Math.PI * 2;
+          const rad = 28 + Math.random() * Math.max(25, currentRadiusRef.current - 95);
+          orbsRef.current.push({
+            x: ARENA_CX + Math.cos(ang) * rad,
+            y: ARENA_CY + Math.sin(ang) * rad,
+            type: Math.random() < 0.65 ? 'rpm' : 'titan',
+            pulse: 0,
+          });
+        }
+        orbsRef.current.forEach((o) => {
+          o.pulse += dt * 6;
+        });
+
+        // Tick spinner timers, dash ghosts & speed trails
         [p1Uid, p2Uid].forEach((uid) => {
           const sp = spinnersRef.current[uid];
           if (!sp) return;
           if (sp.boostCooldown > 0) sp.boostCooldown = Math.max(0, sp.boostCooldown - dt);
-          if (dashTimerRef.current[uid] > 0) dashTimerRef.current[uid] = Math.max(0, dashTimerRef.current[uid] - dt);
-          sp.angle += (sp.spinRpm / 110) * dt;
-          // Slight natural RPM decay recovered by collisions/dashes
-          sp.spinRpm = Math.max(850, sp.spinRpm - dt * 18);
+          if (dashTimerRef.current[uid] > 0) {
+            dashTimerRef.current[uid] = Math.max(0, dashTimerRef.current[uid] - dt);
+            if (Math.random() < 0.55) {
+              ghostsRef.current.push({
+                x: sp.x,
+                y: sp.y,
+                angle: sp.angle,
+                alpha: 0.45,
+                color: uid === p1Uid ? '#fbbf24' : '#38bdf8',
+              });
+            }
+          }
+          if (titanTimerRef.current[uid] > 0) {
+            titanTimerRef.current[uid] = Math.max(0, titanTimerRef.current[uid] - dt);
+          }
+
+          sp.angle += (sp.spinRpm / 95) * dt;
+          sp.spinRpm = Math.max(900, sp.spinRpm - dt * 22);
+
+          const trail = trailsRef.current[uid];
+          if (trail) {
+            trail.push({ x: sp.x, y: sp.y });
+            if (trail.length > 10) trail.shift();
+          }
         });
 
-        // Apply Local Player Input (Keyboard + Canvas Analog Joystick)
+        // 1. Local Player Controls (Crisp high-torque response)
         const localSpinner = spinnersRef.current[playerUid];
         if (localSpinner && localSpinner.alive) {
           let ax = 0;
@@ -374,23 +516,64 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
           const mag = Math.hypot(ax, ay);
           if (mag > 0.05) {
             const norm = Math.min(1, mag);
-            localSpinner.vx += (ax / mag) * 0.56 * norm * step;
-            localSpinner.vy += (ay / mag) * 0.56 * norm * step;
+            const driveAccel = 0.88 * (0.82 + 0.18 * (localSpinner.spinRpm / 1800));
+            localSpinner.vx += (ax / mag) * driveAccel * norm * step;
+            localSpinner.vy += (ay / mag) * driveAccel * norm * step;
           }
         }
 
-        // CyberBot AI (Runs on host)
+        // 2. Multiplayer Remote Sync (2-Human Mode)
+        const oppUid = playerUid === p1Uid ? p2Uid : p1Uid;
+        const oppSpinner = spinnersRef.current[oppUid];
+        if (!isBotPlaying) {
+          syncTick += dt;
+          if (syncTick >= 0.05 && localSpinner) {
+            syncTick = 0;
+            onDispatchActionRef.current('SUMO_SYNC', {
+              x: localSpinner.x,
+              y: localSpinner.y,
+              vx: localSpinner.vx,
+              vy: localSpinner.vy,
+              spinRpm: localSpinner.spinRpm,
+              alive: localSpinner.alive,
+            });
+          }
+
+          const remoteSync = (gs as any)?.spinners?.[oppUid];
+          if (remoteSync && oppSpinner && oppSpinner.alive) {
+            oppSpinner.x += (remoteSync.x - oppSpinner.x) * 0.45;
+            oppSpinner.y += (remoteSync.y - oppSpinner.y) * 0.45;
+            oppSpinner.vx = remoteSync.vx ?? oppSpinner.vx;
+            oppSpinner.vy = remoteSync.vy ?? oppSpinner.vy;
+            oppSpinner.spinRpm = remoteSync.spinRpm ?? oppSpinner.spinRpm;
+          }
+        }
+
+        // 3. Tactical CyberBot AI
         if (isBotPlaying && isHost && s2.alive) {
           const diff = botDifficultyRef.current;
-          const accel = diff === 'hard' ? 0.52 : diff === 'medium' ? 0.43 : 0.34;
+          const accel = diff === 'hard' ? 0.86 : diff === 'medium' ? 0.72 : 0.56;
           const distFromCenter = Math.hypot(s2.x - ARENA_CX, s2.y - ARENA_CY);
+          const safeEdge = currentRadiusRef.current - 54;
 
           let tx = s1.x;
           let ty = s1.y;
-          // Edge survival reflex: pull back toward center if dangerously close to hazard lip
-          if (distFromCenter > ARENA_R - 52) {
+
+          if (distFromCenter > safeEdge) {
+            // Emergency edge recovery sprint back inside
             tx = ARENA_CX;
             ty = ARENA_CY;
+          } else if (orbsRef.current.length > 0 && (s2.spinRpm < 1550 || orbsRef.current[0].type === 'titan')) {
+            // Grab Spin/Titan Orb
+            tx = orbsRef.current[0].x;
+            ty = orbsRef.current[0].y;
+          } else {
+            // Angle slightly toward the inside of player so shoves push player outward!
+            const pFromC_X = s1.x - ARENA_CX;
+            const pFromC_Y = s1.y - ARENA_CY;
+            const pMag = Math.hypot(pFromC_X, pFromC_Y) || 1;
+            tx = s1.x - (pFromC_X / pMag) * 24;
+            ty = s1.y - (pFromC_Y / pMag) * 24;
           }
 
           const dx = tx - s2.x;
@@ -399,95 +582,161 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
           s2.vx += (dx / dist) * accel * step;
           s2.vy += (dy / dist) * accel * step;
 
-          // Aggressive Slam Dash when aligned near opponent & safely inside ring
-          const distToPlayer = Math.hypot(s1.x - s2.x, s1.y - s2.y);
-          if (s2.boostCooldown <= 0 && distFromCenter < ARENA_R - 55 && distToPlayer < 130) {
-            const dashProb = diff === 'hard' ? 0.045 : diff === 'medium' ? 0.025 : 0.012;
-            if (Math.random() < dashProb) {
-              triggerDash(p2Uid);
+          // Smart Slam Dash: trigger when player is aligned toward perimeter & within strike range
+          const pDist = Math.hypot(s1.x - s2.x, s1.y - s2.y);
+          if (s2.boostCooldown <= 0 && distFromCenter < safeEdge && pDist < 135) {
+            const pOutX = s1.x - ARENA_CX;
+            const pOutY = s1.y - ARENA_CY;
+            const attackX = s1.x - s2.x;
+            const attackY = s1.y - s2.y;
+            const align = (pOutX * attackX + pOutY * attackY) / ((Math.hypot(pOutX, pOutY) || 1) * (pDist || 1));
+            if (align > 0.35 || pDist < 75) {
+              const prob = diff === 'hard' ? 0.08 : diff === 'medium' ? 0.04 : 0.015;
+              if (Math.random() < prob) {
+                triggerDash(p2Uid);
+              }
             }
           }
         }
 
-        // Integrate Movement, Concave Stadium Pull, and Friction (dt-normalized)
-        [s1, s2].forEach((sp) => {
-          if (!sp.alive) return;
+        // 4. Integrate Movement, Concave Dish Gravity & Edge Teeter Sparks
+        [p1Uid, p2Uid].forEach((uid) => {
+          const sp = spinnersRef.current[uid];
+          if (!sp || !sp.alive) return;
 
-          // Subtle parabolic stadium bowl pull toward center (keeps action thrilling in the middle)
           const dxC = ARENA_CX - sp.x;
           const dyC = ARENA_CY - sp.y;
           const distC = Math.hypot(dxC, dyC);
-          if (distC > 12) {
-            sp.vx += (dxC / distC) * 0.055 * step;
-            sp.vy += (dyC / distC) * 0.055 * step;
+          if (distC > 10) {
+            sp.vx += (dxC / distC) * 0.085 * step;
+            sp.vy += (dyC / distC) * 0.085 * step;
           }
 
-          const friction = Math.pow(0.976, step);
+          const friction = Math.pow(0.958, step);
           sp.vx *= friction;
           sp.vy *= friction;
           sp.x += sp.vx * step;
           sp.y += sp.vy * step;
+
+          // Edge Teeter Warning Friction Sparks
+          if (distC > currentRadiusRef.current - 26 && Math.random() < 0.45) {
+            juice.emitSparks(sp.x, sp.y, 2, '#ef4444', '#fca5a5', 2.5);
+          }
+
+          // Kinetic Post Bumps
+          for (const post of KINETIC_POSTS) {
+            const pdx = sp.x - post.x;
+            const pdy = sp.y - post.y;
+            const pdist = Math.hypot(pdx, pdy);
+            const minP = SPINNER_R + post.r;
+            if (pdist < minP && pdist > 0.01) {
+              const nx = pdx / pdist;
+              const ny = pdy / pdist;
+              sp.x = post.x + nx * (minP + 1);
+              sp.y = post.y + ny * (minP + 1);
+              const vn = sp.vx * nx + sp.vy * ny;
+              if (vn < 0) {
+                sp.vx -= 1.85 * vn * nx;
+                sp.vy -= 1.85 * vn * ny;
+              }
+              sp.vx += nx * 2.2;
+              sp.vy += ny * 2.2;
+              post.flash = 1.0;
+              juice.emitSparks(post.x + nx * post.r, post.y + ny * post.r, 10, '#38bdf8', '#ffffff', 4);
+              soundService.playClick();
+            }
+          }
         });
 
-        // Elastic Blade-on-Blade Collision Impulse (Properly balanced momentum equation)
+        // 5. Orb Collection
+        for (let oi = orbsRef.current.length - 1; oi >= 0; oi--) {
+          const orb = orbsRef.current[oi];
+          for (const uid of [p1Uid, p2Uid]) {
+            const sp = spinnersRef.current[uid];
+            if (!sp || !sp.alive) continue;
+            if (Math.hypot(sp.x - orb.x, sp.y - orb.y) < SPINNER_R + 14) {
+              if (orb.type === 'rpm') {
+                sp.spinRpm = Math.min(2800, sp.spinRpm + 480);
+                sp.boostCooldown = 0;
+              } else {
+                titanTimerRef.current[uid] = 5.0;
+                sp.spinRpm = Math.min(2800, sp.spinRpm + 260);
+              }
+              juice.emitSparks(orb.x, orb.y, 16, orb.type === 'titan' ? '#f43f5e' : '#38bdf8', '#ffffff', 4);
+              shockwavesRef.current.push({
+                x: orb.x,
+                y: orb.y,
+                r: 6,
+                maxR: 42,
+                alpha: 0.9,
+                color: orb.type === 'titan' ? '#f43f5e' : '#38bdf8',
+              });
+              orbsRef.current.splice(oi, 1);
+              soundService.playScore();
+              break;
+            }
+          }
+        }
+
+        // 6. Spinner-vs-Spinner Blade Clash Impulse (Mass + RPM Power Scaling)
         if (s1.alive && s2.alive) {
+          const r1 = SPINNER_R * (titanTimerRef.current[p1Uid] > 0 ? 1.15 : 1.0);
+          const r2 = SPINNER_R * (titanTimerRef.current[p2Uid] > 0 ? 1.15 : 1.0);
+          const minDist = r1 + r2;
           const cdx = s2.x - s1.x;
           const cdy = s2.y - s1.y;
           const cdist = Math.hypot(cdx, cdy);
-          const minDist = SPINNER_R * 2;
 
           if (cdist < minDist && cdist > 0.001) {
             const nx = cdx / cdist;
             const ny = cdy / cdist;
 
-            // Relative velocity of s2 vs s1 projected onto collision normal
+            const m1 = titanTimerRef.current[p1Uid] > 0 ? 1.45 : 1.0;
+            const m2 = titanTimerRef.current[p2Uid] > 0 ? 1.45 : 1.0;
+
             const rvx = s2.vx - s1.vx;
             const rvy = s2.vy - s1.vy;
             const velAlongNormal = rvx * nx + rvy * ny;
 
             if (velAlongNormal < 0) {
-              const e = 0.96; // Crisp high-energy metal clash restitution
-              const j = (-(1 + e) * velAlongNormal) / 2;
+              const e = 1.04;
+              const j = (-(1 + e) * velAlongNormal) / (1 / m1 + 1 / m2);
 
-              s1.vx -= j * nx;
-              s1.vy -= j * ny;
-              s2.vx += j * nx;
-              s2.vy += j * ny;
+              s1.vx -= (j / m1) * nx;
+              s1.vy -= (j / m1) * ny;
+              s2.vx += (j / m2) * nx;
+              s2.vy += (j / m2) * ny;
 
-              // Dash supremacy bonus knockback
-              if (dashTimerRef.current[p1Uid] > 0) {
-                s2.vx += nx * 4.5;
-                s2.vy += ny * 4.5;
-              }
-              if (dashTimerRef.current[p2Uid] > 0) {
-                s1.vx -= nx * 4.5;
-                s1.vy -= ny * 4.5;
-              }
+              // Dash + Spin-RPM advantage bonus knockback
+              const rpmEdge = ((s1.spinRpm - s2.spinRpm) / 1000) * 1.6;
+              s1.vx -= (dashTimerRef.current[p2Uid] > 0 ? 5.8 : 0) * nx - Math.min(0, rpmEdge) * nx;
+              s1.vy -= (dashTimerRef.current[p2Uid] > 0 ? 5.8 : 0) * ny - Math.min(0, rpmEdge) * ny;
+              s2.vx += (dashTimerRef.current[p1Uid] > 0 ? 5.8 : 0) * nx + Math.max(0, rpmEdge) * nx;
+              s2.vy += (dashTimerRef.current[p1Uid] > 0 ? 5.8 : 0) * ny + Math.max(0, rpmEdge) * ny;
 
-              // Small extra rotational rip repulsion
-              const impactPower = Math.min(18, Math.abs(velAlongNormal));
+              const impactPower = Math.min(20, Math.abs(velAlongNormal));
               const midX = (s1.x + s2.x) / 2;
               const midY = (s1.y + s2.y) / 2;
 
-              s1.spinRpm = Math.max(950, s1.spinRpm - 35);
-              s2.spinRpm = Math.max(950, s2.spinRpm - 35);
+              s1.spinRpm = Math.max(900, s1.spinRpm - 45);
+              s2.spinRpm = Math.max(900, s2.spinRpm - 45);
 
-              juice.addTrauma(Math.min(0.65, 0.22 + impactPower * 0.03));
-              if (impactPower > 7) juice.triggerHitStop(36);
-              juice.emitSparks(midX, midY, 18, '#fef08a');
+              const isCrit = dashTimerRef.current[p1Uid] > 0 || dashTimerRef.current[p2Uid] > 0 || impactPower > 9;
+              juice.addTrauma(isCrit ? 0.65 : 0.25);
+              if (isCrit) juice.triggerHitStop(42);
+              juice.emitSparks(midX, midY, isCrit ? 24 : 14, '#fef08a', '#ffffff', 5);
               shockwavesRef.current.push({
                 x: midX,
                 y: midY,
-                r: 8,
-                maxR: 48 + impactPower * 2.5,
-                alpha: 0.9,
-                color: '#fef08a',
+                r: 10,
+                maxR: isCrit ? 76 : 48,
+                alpha: 0.95,
+                color: isCrit ? '#fb7185' : '#fef08a',
               });
               soundService.playImpact();
             }
 
-            // Positional Overlap Separation
-            const overlap = minDist - cdist + 0.5;
+            const overlap = minDist - cdist + 0.8;
             s1.x -= nx * (overlap * 0.5);
             s1.y -= ny * (overlap * 0.5);
             s2.x += nx * (overlap * 0.5);
@@ -495,8 +744,8 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
           }
         }
 
-        // Ring-Out Check (Edge falls off at ARENA_R - 8)
-        const ringLimit = ARENA_R - 6;
+        // 7. Ring-Out Detection Against Current Hazard Radius
+        const ringLimit = currentRadiusRef.current - 5;
         [p1Uid, p2Uid].forEach((uid) => {
           const sp = spinnersRef.current[uid];
           if (!sp || !sp.alive || roundResolvedRef.current) return;
@@ -514,9 +763,9 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
               alpha: 1,
               color: uid === p1Uid ? '#fbbf24' : '#38bdf8',
             });
-            juice.addTrauma(0.75);
-            juice.triggerHitStop(75);
-            juice.emitExplosion(sp.x, sp.y, 24);
+            juice.addTrauma(0.8);
+            juice.triggerHitStop(78);
+            juice.emitExplosion(sp.x, sp.y, 45);
             soundService.playGoal();
 
             const victorUid = uid === p1Uid ? p2Uid : p1Uid;
@@ -535,30 +784,32 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
         if (hudTick >= 0.08) {
           hudTick = 0;
           const mine = spinnersRef.current[playerUid];
-          if (mine) setBoostCdPct(Math.round((mine.boostCooldown / 2.6) * 100));
+          if (mine) setBoostCdPct(Math.round((mine.boostCooldown / 2.1) * 100));
           setP1RpmUi(Math.round(s1.spinRpm));
           setP2RpmUi(Math.round(s2.spinRpm));
+          setShrinkWarning(elapsedRoundRef.current > 13);
         }
       },
       render: () => {
         const ctx = cm.ctx;
         const scale = cm.width / W;
         const juice = juiceRef.current;
+        const curR = currentRadiusRef.current;
 
         ctx.save();
         ctx.scale(scale, scale);
 
-        // Deep Abyss Background Outside Ring
-        const voidGrad = ctx.createRadialGradient(ARENA_CX, ARENA_CY, ARENA_R * 0.7, ARENA_CX, ARENA_CY, 300);
+        // Deep Abyss Void Backdrop
+        const voidGrad = ctx.createRadialGradient(ARENA_CX, ARENA_CY, curR * 0.65, ARENA_CX, ARENA_CY, 305);
         voidGrad.addColorStop(0, '#0f172a');
-        voidGrad.addColorStop(0.75, '#050814');
+        voidGrad.addColorStop(0.7, '#060916');
         voidGrad.addColorStop(1, '#02040a');
         ctx.fillStyle = voidGrad;
         ctx.fillRect(0, 0, W, H);
 
         ctx.translate(juice.offsetX, juice.offsetY);
 
-        // Ring-out Fall Spiral Animations (drawn beneath rim lip)
+        // Ring-out Fall Spiral Animations (drawn beneath stadium edge)
         fallsRef.current.forEach((f) => {
           ctx.save();
           ctx.globalAlpha = f.alpha;
@@ -572,76 +823,151 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
           ctx.restore();
         });
 
-        // Outer Elevated Stadium Rim & Drop Shadow
+        // Outer Structural Platform Lip
         ctx.save();
-        ctx.shadowColor = 'rgba(239, 68, 68, 0.25)';
+        ctx.shadowColor = elapsedRoundRef.current > 13 ? 'rgba(239, 68, 68, 0.55)' : 'rgba(56, 189, 248, 0.25)';
         ctx.shadowBlur = 28;
-        ctx.fillStyle = '#0f172a';
+        ctx.fillStyle = '#090d16';
         ctx.beginPath();
-        ctx.arc(ARENA_CX, ARENA_CY, ARENA_R + 18, 0, Math.PI * 2);
+        ctx.arc(ARENA_CX, ARENA_CY, BASE_ARENA_R + 18, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
 
-        // Hazard Chevron Outer Zone
-        ctx.save();
-        ctx.strokeStyle = 'rgba(239, 68, 68, 0.55)';
-        ctx.lineWidth = 10;
-        ctx.setLineDash([12, 10]);
-        ctx.beginPath();
-        ctx.arc(ARENA_CX, ARENA_CY, ARENA_R + 6, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
+        // Dark Collapsed Void Ring when Sudden Death Shrinks
+        if (curR < BASE_ARENA_R - 2) {
+          ctx.strokeStyle = 'rgba(239, 68, 68, 0.25)';
+          ctx.lineWidth = BASE_ARENA_R - curR;
+          ctx.beginPath();
+          ctx.arc(ARENA_CX, ARENA_CY, (BASE_ARENA_R + curR) / 2, 0, Math.PI * 2);
+          ctx.stroke();
+        }
 
-        // Concave Stadium Bowl Surface
-        const dishGrad = ctx.createRadialGradient(ARENA_CX - 28, ARENA_CY - 28, 18, ARENA_CX, ARENA_CY, ARENA_R);
+        // Active Concave Dohyo Dish Surface
+        const dishGrad = ctx.createRadialGradient(ARENA_CX - 26, ARENA_CY - 26, 16, ARENA_CX, ARENA_CY, curR);
         dishGrad.addColorStop(0, '#1e293b');
         dishGrad.addColorStop(0.55, '#0f172a');
-        dishGrad.addColorStop(0.92, '#1e1b4b');
+        dishGrad.addColorStop(0.88, '#1e1b4b');
         dishGrad.addColorStop(1, '#312e81');
         ctx.fillStyle = dishGrad;
         ctx.beginPath();
-        ctx.arc(ARENA_CX, ARENA_CY, ARENA_R, 0, Math.PI * 2);
+        ctx.arc(ARENA_CX, ARENA_CY, curR, 0, Math.PI * 2);
         ctx.fill();
 
-        // Metallic Bowl Rim Highlight
-        ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(ARENA_CX, ARENA_CY, ARENA_R, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Concentric Stadium Rings + 8 Radial Grid Lines
+        // Animated Crimson Hazard Chevron Perimeter at Active Radius
         ctx.save();
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.14)';
-        ctx.lineWidth = 1.2;
-        [45, 95, ARENA_R - 22].forEach((r, idx) => {
-          ctx.strokeStyle = idx === 2 ? 'rgba(239, 68, 68, 0.35)' : 'rgba(56, 189, 248, 0.14)';
+        ctx.strokeStyle = elapsedRoundRef.current > 13 ? '#ef4444' : 'rgba(239, 68, 68, 0.65)';
+        ctx.lineWidth = 6;
+        ctx.setLineDash([12, 10]);
+        ctx.lineDashOffset = -performance.now() * 0.025;
+        ctx.beginPath();
+        ctx.arc(ARENA_CX, ARENA_CY, curR - 2, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+
+        // Stadium Rings & Radial Energy Grid
+        ctx.save();
+        [44, 96].forEach((r) => {
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.16)';
+          ctx.lineWidth = 1.4;
           ctx.beginPath();
           ctx.arc(ARENA_CX, ARENA_CY, r, 0, Math.PI * 2);
           ctx.stroke();
         });
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.lineWidth = 1;
         for (let k = 0; k < 8; k++) {
           const a = (k * Math.PI) / 4;
           ctx.beginPath();
           ctx.moveTo(ARENA_CX, ARENA_CY);
-          ctx.lineTo(ARENA_CX + Math.cos(a) * ARENA_R, ARENA_CY + Math.sin(a) * ARENA_R);
+          ctx.lineTo(ARENA_CX + Math.cos(a) * curR, ARENA_CY + Math.sin(a) * curR);
           ctx.stroke();
         }
         ctx.restore();
 
-        // Center Dojo Emblem
-        ctx.strokeStyle = 'rgba(251, 191, 36, 0.25)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(ARENA_CX, ARENA_CY, 16, 0, Math.PI * 2);
-        ctx.stroke();
+        // Kinetic Bounce Posts
+        for (const post of KINETIC_POSTS) {
+          ctx.save();
+          ctx.translate(post.x, post.y);
+          ctx.fillStyle = post.flash > 0.1 ? '#ffffff' : '#0f172a';
+          ctx.strokeStyle = post.flash > 0.1 ? '#fde047' : '#38bdf8';
+          ctx.shadowColor = '#38bdf8';
+          ctx.shadowBlur = post.flash > 0.1 ? 18 : 10;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, post.r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#38bdf8';
+          ctx.beginPath();
+          ctx.arc(0, 0, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // Spin & Titan Orbs
+        for (const orb of orbsRef.current) {
+          const s = 1 + Math.sin(orb.pulse) * 0.14;
+          const isTitan = orb.type === 'titan';
+          const col = isTitan ? '#f43f5e' : '#22d3ee';
+          ctx.save();
+          ctx.translate(orb.x, orb.y);
+          ctx.scale(s, s);
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+          ctx.strokeStyle = col;
+          ctx.shadowColor = col;
+          ctx.shadowBlur = 16;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, 12, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          ctx.font = '12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(isTitan ? '🛡️' : '⚡', 0, 1);
+          ctx.restore();
+        }
+
+        // Dash Afterimage Ghosts
+        ghostsRef.current.forEach((g) => {
+          ctx.save();
+          ctx.globalAlpha = g.alpha;
+          ctx.translate(g.x, g.y);
+          ctx.fillStyle = g.color;
+          ctx.beginPath();
+          ctx.arc(0, 0, SPINNER_R * 0.85, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        });
 
         // Draw Spinners
         const s1 = spinnersRef.current[p1Uid];
         const s2 = spinnersRef.current[p2Uid];
-        if (s1) drawTopSpinner(ctx, s1, '#fbbf24', 'rgba(251,191,36,0.9)', '#fde047', dashTimerRef.current[p1Uid] > 0);
-        if (s2) drawTopSpinner(ctx, s2, '#38bdf8', 'rgba(56,189,248,0.9)', '#7dd3fc', dashTimerRef.current[p2Uid] > 0);
+        if (s1) {
+          drawTopSpinner(
+            ctx,
+            p1Uid,
+            s1,
+            '#fbbf24',
+            'rgba(251,191,36,0.9)',
+            '#fde047',
+            dashTimerRef.current[p1Uid] > 0,
+            titanTimerRef.current[p1Uid] > 0
+          );
+        }
+        if (s2) {
+          drawTopSpinner(
+            ctx,
+            p2Uid,
+            s2,
+            '#38bdf8',
+            'rgba(56,189,248,0.9)',
+            '#7dd3fc',
+            dashTimerRef.current[p2Uid] > 0,
+            titanTimerRef.current[p2Uid] > 0
+          );
+        }
 
         // Clash Shockwaves
         shockwavesRef.current.forEach((sw) => {
@@ -659,20 +985,19 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
         if (pointerStickRef.current.active) {
           const st = pointerStickRef.current;
           ctx.save();
-          ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+          ctx.strokeStyle = 'rgba(255,255,255,0.3)';
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.arc(st.originX, st.originY, 34, 0, Math.PI * 2);
           ctx.stroke();
 
-          ctx.fillStyle = isP1Local ? 'rgba(251,191,36,0.75)' : 'rgba(56,189,248,0.75)';
+          ctx.fillStyle = isP1Local ? 'rgba(251,191,36,0.8)' : 'rgba(56,189,248,0.8)';
           ctx.beginPath();
           ctx.arc(st.curX, st.curY, 12, 0, Math.PI * 2);
           ctx.fill();
           ctx.restore();
         }
 
-        // Particles
         juice.renderParticles(ctx, 1);
 
         ctx.restore();
@@ -752,8 +1077,12 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
           <span className="text-[9px] font-black tracking-[0.22em] text-slate-400 uppercase">
             Round {room.currentRound} • First to {room.maxRounds}
           </span>
-          <span className="text-xs font-black text-white uppercase tracking-wider mt-0.5">
-            {gameState?.roundWinner ? 'RING OUT!' : 'Bey-Stadium Clash'}
+          <span
+            className={`text-xs font-black uppercase tracking-wider mt-0.5 ${
+              shrinkWarning ? 'text-rose-400 animate-pulse' : 'text-white'
+            }`}
+          >
+            {gameState?.roundWinner ? 'RING OUT!' : shrinkWarning ? 'RING SHRINKING!' : 'Orb Clash Arena'}
           </span>
         </div>
 
@@ -784,9 +1113,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
         {gameState?.roundWinner && (
           <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-200 pointer-events-none">
             <div className="px-6 py-3 rounded-2xl bg-slate-900 border border-white/15 shadow-2xl text-center">
-              <div className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-400">
-                KO • Ring Out
-              </div>
+              <div className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-400">KO • Ring Out</div>
               <div className="text-2xl sm:text-3xl font-black text-white uppercase tracking-tight mt-1">
                 {gameState.roundWinner === p1Uid ? p1Nickname : p2Nickname} Wins!
               </div>
@@ -799,7 +1126,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
       <div className="w-full max-w-[480px] mt-3 flex items-center gap-3">
         <div className="hidden sm:flex flex-col px-3.5 py-2 rounded-2xl bg-slate-900/80 border border-white/10 text-[10px] text-slate-300 font-bold uppercase tracking-wider">
           <span>Move: Drag / WASD</span>
-          <span className="text-slate-400">Dash: Spacebar</span>
+          <span className="text-cyan-300">Grab ⚡RPM & 🛡️Titan Orbs</span>
         </div>
 
         <button
@@ -809,7 +1136,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
           className={`relative flex-1 overflow-hidden py-3.5 px-5 rounded-2xl font-black uppercase tracking-widest text-sm transition-all border ${
             boostCdPct > 0 || gameState?.roundWinner
               ? 'bg-slate-800/80 text-slate-400 border-white/5 cursor-not-allowed'
-              : 'bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 hover:brightness-110 active:scale-[0.97] text-slate-950 border-amber-300/60 shadow-[0_8px_28px_rgba(245,158,11,0.35)]'
+              : 'bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 hover:brightness-110 active:scale-[0.97] text-slate-950 border-amber-300/60 shadow-[0_8px_28px_rgba(245,158,11,0.35)] cursor-pointer'
           }`}
         >
           {boostCdPct > 0 && (
@@ -819,7 +1146,7 @@ export const SumoSpinView: React.FC<SumoSpinViewProps> = ({ room, playerUid, onD
             />
           )}
           <span className="relative z-10 flex items-center justify-between">
-            <span>⚡ Slam Dash (Auto-Lock)</span>
+            <span>⚡ Slam Dash (Space)</span>
             <span className="text-xs px-2 py-0.5 rounded bg-slate-950/30 text-white">
               {boostCdPct > 0 ? 'RECHARGING' : 'READY'}
             </span>
