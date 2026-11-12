@@ -18,11 +18,17 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
   const players = Object.keys(room.players);
   const bottomUid = players[0] || playerUid;
   const topUid = players[1] || (bottomUid === 'bot_rival' ? 'player' : 'bot_rival');
-  const isHost = room.hostUid === playerUid;
-  const isBotPlaying = Boolean(room.players['bot_rival'] || topUid === 'bot_rival');
+  const isHost = room.hostUid === playerUid || playerUid === bottomUid;
+  const isBotPlaying = Boolean(room.players['bot_rival'] || topUid === 'bot_rival' || topUid.startsWith('bot_') || players.length < 2);
 
-  const p1Nickname = room.players[bottomUid]?.nickname || 'Player 1';
-  const p2Nickname = room.players[topUid]?.nickname || 'CyberBot';
+  const oppUid = bottomUid === playerUid ? topUid : bottomUid;
+  const myNickname = room.players[playerUid]?.nickname || 'You';
+  const oppNickname = room.players[oppUid]?.nickname || (isBotPlaying ? 'CyberBot' : 'Rival');
+
+  const onDispatchActionRef = useRef(onDispatchAction);
+  onDispatchActionRef.current = onDispatchAction;
+  const roomRef = useRef(room);
+  roomRef.current = room;
 
   const [scorerBanner, setScorerBanner] = useState<{ name: string; isP1: boolean } | null>(null);
   const scorerBannerRef = useRef<{ name: string; isP1: boolean } | null>(null);
@@ -86,21 +92,32 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
     };
   }, []);
 
-  // Sync opponent paddle in 2P network rooms (supports 2D X and Y!)
+  // Sync opponent paddle & authoritative ball in 2P network rooms (mirrored cleanly per phone!)
   useEffect(() => {
     if (!isBotPlaying && room.gameState?.paddles) {
-      const oppUid = bottomUid === playerUid ? topUid : bottomUid;
       const remote = room.gameState.paddles[oppUid];
       if (typeof remote === 'number') {
-        oppPaddle.current.targetX = (remote / 100) * W;
+        const rawX = isHost ? remote : 100 - remote;
+        oppPaddle.current.targetX = (rawX / 100) * W;
       } else if (remote && typeof remote.x === 'number') {
-        oppPaddle.current.targetX = (remote.x / 100) * W;
-        if (typeof remote.y === 'number') {
-          oppPaddle.current.targetY = (remote.y / 100) * H;
-        }
+        const rawX = isHost ? remote.x : 100 - remote.x;
+        const rawY = typeof remote.y === 'number' ? (isHost ? remote.y : 100 - remote.y) : 15;
+        oppPaddle.current.targetX = (rawX / 100) * W;
+        oppPaddle.current.targetY = (rawY / 100) * H;
       }
     }
-  }, [room.gameState?.paddles, isBotPlaying, bottomUid, topUid, playerUid]);
+
+    if (!isBotPlaying && !isHost && room.gameState?.ball) {
+      const rb = room.gameState.ball;
+      // Mirror host coordinates so guest sees themselves at bottom and opponent at top
+      const targetBx = ((100 - rb.x) / 100) * W;
+      const targetBy = ((100 - rb.y) / 100) * H;
+      ball.current.x += (targetBx - ball.current.x) * 0.6;
+      ball.current.y += (targetBy - ball.current.y) * 0.6;
+      ball.current.vx = -((rb.vx / 100) * W);
+      ball.current.vy = -((rb.vy / 100) * H);
+    }
+  }, [room.gameState?.paddles, room.gameState?.ball, isBotPlaying, isHost, oppUid]);
 
   // Main 60 FPS Game Loop
   useEffect(() => {
@@ -175,13 +192,35 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
       myPaddle.current.vx = (myPaddle.current.x - prevMyX);
       myPaddle.current.vy = (myPaddle.current.y - prevMyY);
 
-      // Throttled network broadcast (20 Hz)
-      if (now - lastNetworkDispatch.current > 48) {
+      // Smoothly interpolate opponent mallet in 2P network mode
+      if (!isBotPlaying) {
+        const prevOpX = oppPaddle.current.x;
+        const prevOpY = oppPaddle.current.y;
+        oppPaddle.current.x += (oppPaddle.current.targetX - oppPaddle.current.x) * Math.min(1, dt * 18);
+        oppPaddle.current.y += (oppPaddle.current.targetY - oppPaddle.current.y) * Math.min(1, dt * 18);
+        oppPaddle.current.vx = oppPaddle.current.x - prevOpX;
+        oppPaddle.current.vy = oppPaddle.current.y - prevOpY;
+      }
+
+      // Throttled network broadcast (~20 Hz)
+      if (!isBotPlaying && now - lastNetworkDispatch.current > 48) {
         lastNetworkDispatch.current = now;
-        onDispatchAction('PONG_PADDLE', {
-          xPos: Math.round((myPaddle.current.x / W) * 100),
-          yPos: Math.round((myPaddle.current.y / H) * 100)
+        const xPct = (myPaddle.current.x / W) * 100;
+        const yPct = (myPaddle.current.y / H) * 100;
+        onDispatchActionRef.current('PONG_PADDLE', {
+          xPos: Math.round(isHost ? xPct : 100 - xPct),
+          yPos: Math.round(isHost ? yPct : 100 - yPct)
         });
+
+        if (isHost && goalCooldown.current <= 0) {
+          onDispatchActionRef.current('PONG_BALL', {
+            x: (ball.current.x / W) * 100,
+            y: (ball.current.y / H) * 100,
+            vx: (ball.current.vx / W) * 100,
+            vy: (ball.current.vy / H) * 100,
+            speed: ball.current.speed
+          });
+        }
       }
 
       // Goal Cooldown Pause
@@ -306,33 +345,37 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
         juice.emitSparks(b.x, b.y, 14, '#f43f5e', '#be123c', 4);
       }
 
-      // Goal Scored Detection
+      // Goal Scored Detection (Authoritative on Host or vs Bot!)
       // Top Goal: YOU (Bottom) Scored!
       if (b.y < -8) {
-        goalCooldown.current = 1.0;
-        const banner = { name: p1Nickname, isP1: true };
-        scorerBannerRef.current = banner;
-        setScorerBanner(banner);
-        soundService.playGoal();
-        juice.addTrauma(0.5);
-        juice.emitExplosion(b.x, 20, 35);
+        if (isHost || isBotPlaying) {
+          goalCooldown.current = 1.0;
+          const banner = { name: myNickname, isP1: true };
+          scorerBannerRef.current = banner;
+          setScorerBanner(banner);
+          soundService.playGoal();
+          juice.addTrauma(0.5);
+          juice.emitExplosion(b.x, 20, 35);
 
-        onDispatchAction('PONG_GOAL', { scorerUid: bottomUid, actingUid: playerUid });
-        serve(false);
+          onDispatchActionRef.current('PONG_GOAL', { scorerUid: playerUid, actingUid: playerUid });
+          serve(false);
+        }
       }
 
       // Bottom Goal: OPPONENT (Top) Scored!
       if (b.y > H + 8) {
-        goalCooldown.current = 1.0;
-        const banner = { name: p2Nickname, isP1: false };
-        scorerBannerRef.current = banner;
-        setScorerBanner(banner);
-        soundService.playGoal();
-        juice.addTrauma(0.5);
-        juice.emitExplosion(b.x, H - 20, 35);
+        if (isHost || isBotPlaying) {
+          goalCooldown.current = 1.0;
+          const banner = { name: oppNickname, isP1: false };
+          scorerBannerRef.current = banner;
+          setScorerBanner(banner);
+          soundService.playGoal();
+          juice.addTrauma(0.5);
+          juice.emitExplosion(b.x, H - 20, 35);
 
-        onDispatchAction('PONG_GOAL', { scorerUid: topUid, actingUid: playerUid });
-        serve(true);
+          onDispatchActionRef.current('PONG_GOAL', { scorerUid: oppUid, actingUid: playerUid });
+          serve(true);
+        }
       }
     };
 
@@ -458,7 +501,7 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
       // Top Name
       ctx.fillStyle = '#ffffff';
       ctx.font = '900 11px "Outfit", sans-serif';
-      ctx.fillText(p2Nickname.substring(0, 10).toUpperCase(), op.x, op.y - PADDLE_R - 8);
+      ctx.fillText(oppNickname.substring(0, 10).toUpperCase(), op.x, op.y - PADDLE_R - 8);
 
       // Bottom Mallet (YOU / Electric Cyan & Royal Blue)
       const my = myPaddle.current;
@@ -525,10 +568,10 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
       canvas.removeEventListener('pointerdown', handlePointerDown);
       canvas.removeEventListener('pointermove', handlePointerMove);
     };
-  }, [bottomUid, topUid, isBotPlaying, isHost, p1Nickname, p2Nickname, onDispatchAction]);
+  }, [bottomUid, topUid, oppUid, isBotPlaying, isHost, myNickname, oppNickname, playerUid]);
 
-  const p1Score = room.scores[bottomUid] || 0;
-  const p2Score = room.scores[topUid] || 0;
+  const myScore = room.scores[playerUid] || 0;
+  const oppScore = room.scores[oppUid] || 0;
   const targetWins = room.maxRounds || room.gameState?.targetScore || 5;
 
   return (
@@ -537,8 +580,8 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
       <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-2xl bg-slate-900/90 border border-white/10 text-xs font-mono font-bold shadow-md">
         <div className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
-          <span className="text-rose-300 font-['Outfit'] font-black truncate max-w-[100px]">{p2Nickname}</span>
-          <span className="text-rose-400 font-black text-base">{p2Score}</span>
+          <span className="text-rose-300 font-['Outfit'] font-black truncate max-w-[100px]">{oppNickname}</span>
+          <span className="text-rose-400 font-black text-base">{oppScore}</span>
         </div>
 
         <div className="flex items-center gap-1 text-[11px] text-amber-400 font-bold px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30">
@@ -547,8 +590,8 @@ export const PongView: React.FC<PongViewProps> = ({ room, playerUid, onDispatchA
         </div>
 
         <div className="flex items-center gap-1.5">
-          <span className="text-cyan-400 font-black text-base">{p1Score}</span>
-          <span className="text-cyan-300 font-['Outfit'] font-black truncate max-w-[100px]">{p1Nickname} (YOU)</span>
+          <span className="text-cyan-400 font-black text-base">{myScore}</span>
+          <span className="text-cyan-300 font-['Outfit'] font-black truncate max-w-[100px]">{myNickname} (YOU)</span>
           <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
         </div>
       </div>

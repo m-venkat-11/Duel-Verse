@@ -1,6 +1,6 @@
 import Peer, { type DataConnection } from 'peerjs';
 import type { AuthoritativeRoomState, PlayerSession, RoomAction } from '../../types/room';
-import type { IRoomTransport } from './types';
+import type { IRoomTransport, TransportConnectionStatus } from './types';
 import { BroadcastTransport } from './broadcastTransport';
 
 interface WebRTCMessage {
@@ -14,6 +14,7 @@ interface WebRTCMessage {
     | 'REMATCH'
     | 'SWITCH_GAME'
     | 'RESET_LOBBY'
+    | 'MATCH_CONFIG'
     | 'HEARTBEAT'
     | 'LEAVE';
   payload?: any;
@@ -27,6 +28,29 @@ function getHostPeerId(cleanId: string): string {
   return `dv_host_${cleanId}`;
 }
 
+const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+  { urls: 'stun:openrelay.metered.ca:80' },
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+];
+
 export class WebRTCTransport implements IRoomTransport {
   private broadcast: BroadcastTransport = new BroadcastTransport();
   private peer: Peer | null = null;
@@ -34,66 +58,159 @@ export class WebRTCTransport implements IRoomTransport {
   private hostConnection: DataConnection | null = null;
   private activeRoomId: string | null = null;
   private isHost: boolean = false;
-  private localPlayerUid: string | null = null;
+  private localPlayer: PlayerSession | null = null;
   private listeners: Map<string, Set<(room: AuthoritativeRoomState) => void>> = new Map();
+  private statusListeners: Set<(status: TransportConnectionStatus) => void> = new Set();
+  private connectionStatus: TransportConnectionStatus = 'idle';
   private latestRemoteRoom: AuthoritativeRoomState | null = null;
+  private outboundQueue: WebRTCMessage[] = [];
+  private isReconnectingGuest: boolean = false;
+  private lifecycleAttached: boolean = false;
 
-  private initPeer(customId?: string): Promise<Peer> {
-    return new Promise((resolve) => {
-      if (this.peer && !this.peer.destroyed) {
-        resolve(this.peer);
-        return;
+  constructor() {
+    this.attachBrowserLifecycle();
+  }
+
+  private setStatus(status: TransportConnectionStatus) {
+    if (this.connectionStatus === status) return;
+    this.connectionStatus = status;
+    this.statusListeners.forEach((cb) => cb(status));
+  }
+
+  public subscribeStatus(cb: (status: TransportConnectionStatus) => void): () => void {
+    this.statusListeners.add(cb);
+    cb(this.connectionStatus);
+    return () => {
+      this.statusListeners.delete(cb);
+    };
+  }
+
+  public getRoomSnapshot(roomId: string): AuthoritativeRoomState | null {
+    const formattedId = roomId.toUpperCase().trim();
+    if (!this.isHost && this.latestRemoteRoom?.roomId === formattedId) {
+      return this.latestRemoteRoom;
+    }
+    return this.broadcast.getStoredRoomDirect(formattedId);
+  }
+
+  private attachBrowserLifecycle() {
+    if (this.lifecycleAttached || typeof window === 'undefined') return;
+    this.lifecycleAttached = true;
+
+    const resumeConnection = () => {
+      if (!this.activeRoomId) return;
+
+      // Mobile Safari / Chrome background suspend recovery when user switches apps (e.g. WhatsApp share)
+      if (this.peer && !this.peer.destroyed && this.peer.disconnected) {
+        try {
+          this.peer.reconnect();
+        } catch {
+          // Will re-init below if needed
+        }
       }
 
-      const peer = customId
-        ? new Peer(customId, {
-            config: {
-              iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:global.stun.twilio.com:3478' }
-              ]
-            }
-          })
-        : new Peer({
-            config: {
-              iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:global.stun.twilio.com:3478' }
-              ]
-            }
-          });
+      if (this.isHost && (!this.peer || this.peer.destroyed)) {
+        this.bindHostPeer(this.activeRoomId);
+      } else if (!this.isHost && this.localPlayer && (!this.hostConnection || !this.hostConnection.open)) {
+        this.attemptGuestReconnect();
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          resumeConnection();
+        }
+      });
+    }
+    window.addEventListener('online', resumeConnection);
+  }
+
+  private createPeerInstance(customId?: string): Promise<Peer> {
+    return new Promise((resolve, reject) => {
+      const options = {
+        config: {
+          iceServers: DEFAULT_ICE_SERVERS,
+          iceCandidatePoolSize: 4,
+        },
+        pingInterval: 5000,
+      };
+
+      const peer = customId ? new Peer(customId, options) : new Peer(options);
+      let settled = false;
+
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          if (peer.open) {
+            this.peer = peer;
+            resolve(peer);
+          } else {
+            resolve(peer);
+          }
+        }
+      }, 5000);
 
       peer.on('open', () => {
-        this.peer = peer;
-        resolve(peer);
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          this.peer = peer;
+          resolve(peer);
+        }
       });
 
-      peer.on('error', (err) => {
-        console.warn('WebRTC PeerJS Notice:', err.message || err);
-        // If ID taken or error, still resolve to avoid hanging
-        resolve(peer);
+      peer.on('disconnected', () => {
+        // Keep signaling channel alive if a room is open
+        if (this.activeRoomId && !peer.destroyed) {
+          this.setStatus('reconnecting');
+          setTimeout(() => {
+            if (this.activeRoomId && !peer.destroyed && peer.disconnected) {
+              try {
+                peer.reconnect();
+              } catch {
+                // ignore
+              }
+            }
+          }, 900);
+        }
       });
 
-      // Timeout fallback
-      setTimeout(() => {
-        resolve(peer);
-      }, 4000);
+      peer.on('error', (err: any) => {
+        console.warn('WebRTC PeerJS Notice:', err?.type || err?.message || err);
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          if (err?.type === 'unavailable-id') {
+            reject(err);
+          } else {
+            this.peer = peer;
+            resolve(peer);
+          }
+        }
+      });
     });
   }
 
-  public async createRoom(
-    hostPlayer: PlayerSession,
-    initialGameId: string,
-    maxRounds: number = 3
-  ): Promise<string> {
-    this.isHost = true;
-    this.localPlayerUid = hostPlayer.uid;
+  private async initPeer(customId?: string): Promise<Peer> {
+    if (this.peer && !this.peer.destroyed) {
+      if (this.peer.disconnected) {
+        try {
+          this.peer.reconnect();
+        } catch {
+          // recreate below if reconnect throws
+        }
+      }
+      if (!customId || this.peer.id === customId) {
+        return this.peer;
+      }
+      this.peer.destroy();
+      this.peer = null;
+    }
+    return this.createPeerInstance(customId);
+  }
 
-    // 1. Authoritative local room created via broadcast engine
-    const roomId = await this.broadcast.createRoom(hostPlayer, initialGameId, maxRounds);
-    this.activeRoomId = roomId;
-
-    // 2. Open PeerJS Host listener so external phones/PCs can join
+  private async bindHostPeer(roomId: string) {
     const cleanId = cleanRoomCode(roomId);
     const hostPeerId = getHostPeerId(cleanId);
 
@@ -102,23 +219,40 @@ export class WebRTCTransport implements IRoomTransport {
         this.peer.destroy();
         this.peer = null;
       }
-      const peer = await this.initPeer(hostPeerId);
-
+      const peer = await this.createPeerInstance(hostPeerId);
       peer.on('connection', (conn) => {
         this.setupHostConnection(conn, roomId);
       });
+      this.setStatus(this.connections.size > 0 ? 'connected_p2p' : 'hosting');
     } catch (e) {
-      console.warn('Could not bind WebRTC host peer ID, continuing with local sync:', e);
+      console.warn('Could not bind WebRTC host peer ID, continuing locally:', e);
+      this.setStatus('hosting');
     }
+  }
 
+  public async createRoom(
+    hostPlayer: PlayerSession,
+    initialGameId: string,
+    maxRounds: number = 3
+  ): Promise<string> {
+    this.isHost = true;
+    this.localPlayer = hostPlayer;
+    this.latestRemoteRoom = null;
+    this.connections.clear();
+    this.setStatus('connecting');
+
+    const roomId = await this.broadcast.createRoom(hostPlayer, initialGameId, maxRounds);
+    this.activeRoomId = roomId;
+
+    await this.bindHostPeer(roomId);
     return roomId;
   }
 
   private setupHostConnection(conn: DataConnection, roomId: string) {
     conn.on('open', () => {
       this.connections.set(conn.peer, conn);
+      this.setStatus('connected_p2p');
 
-      // Send immediate current room state to guest
       const current = this.broadcast.getStoredRoomDirect(roomId);
       if (current) {
         conn.send({ type: 'ROOM_UPDATE', payload: current });
@@ -135,6 +269,8 @@ export class WebRTCTransport implements IRoomTransport {
           const current = this.broadcast.getStoredRoomDirect(roomId);
           conn.send({ type: 'JOIN_ACK', payload: { success: res.success, error: res.error, room: current } });
           if (current) {
+            // Ensure Host React listener is updated even before subscribe() settles
+            this.notifyLocalListeners(roomId, current);
             this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
           }
           break;
@@ -142,55 +278,36 @@ export class WebRTCTransport implements IRoomTransport {
 
         case 'ACTION': {
           await this.broadcast.dispatchAction(msg.payload.action);
-          const current = this.broadcast.getStoredRoomDirect(roomId);
-          if (current) {
-            this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-          }
           break;
         }
 
         case 'READY': {
           await this.broadcast.toggleReady(roomId, msg.payload.playerUid);
-          const current = this.broadcast.getStoredRoomDirect(roomId);
-          if (current) {
-            this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-          }
           break;
         }
 
         case 'START': {
           await this.broadcast.startGame(roomId);
-          const current = this.broadcast.getStoredRoomDirect(roomId);
-          if (current) {
-            this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-          }
           break;
         }
 
         case 'REMATCH': {
           await this.broadcast.voteRematch(roomId, msg.payload.playerUid);
-          const current = this.broadcast.getStoredRoomDirect(roomId);
-          if (current) {
-            this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-          }
           break;
         }
 
         case 'SWITCH_GAME': {
           await this.broadcast.switchGame(roomId, msg.payload.newGameId);
-          const current = this.broadcast.getStoredRoomDirect(roomId);
-          if (current) {
-            this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-          }
           break;
         }
 
         case 'RESET_LOBBY': {
           await this.broadcast.resetRoomToLobby(roomId);
-          const current = this.broadcast.getStoredRoomDirect(roomId);
-          if (current) {
-            this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-          }
+          break;
+        }
+
+        case 'MATCH_CONFIG': {
+          await this.broadcast.updateMatchConfig(roomId, msg.payload.maxRounds, msg.payload.difficulty);
           break;
         }
 
@@ -202,10 +319,7 @@ export class WebRTCTransport implements IRoomTransport {
         case 'LEAVE': {
           await this.broadcast.leaveRoom(roomId, msg.payload.playerUid);
           this.connections.delete(conn.peer);
-          const current = this.broadcast.getStoredRoomDirect(roomId);
-          if (current) {
-            this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-          }
+          if (this.connections.size === 0) this.setStatus('hosting');
           break;
         }
       }
@@ -213,15 +327,149 @@ export class WebRTCTransport implements IRoomTransport {
 
     conn.on('close', () => {
       this.connections.delete(conn.peer);
+      if (this.connections.size === 0 && this.activeRoomId) {
+        this.setStatus('hosting');
+      }
     });
   }
 
   private broadcastToGuests(msg: WebRTCMessage) {
     this.connections.forEach((conn) => {
       if (conn.open) {
-        conn.send(msg);
+        try {
+          conn.send(msg);
+        } catch {
+          // ignore transient channel send error
+        }
       }
     });
+  }
+
+  private connectToHostOnce(formattedId: string, player: PlayerSession, timeoutMs: number): Promise<{ success: boolean; error?: string }> {
+    const cleanId = cleanRoomCode(formattedId);
+    const hostPeerId = getHostPeerId(cleanId);
+
+    return new Promise(async (resolve) => {
+      try {
+        const peer = await this.initPeer();
+        if (peer.destroyed) {
+          this.peer = null;
+          await this.initPeer();
+        }
+      } catch {
+        resolve({ success: false, error: 'Unable to initialize P2P connection.' });
+        return;
+      }
+
+      if (!this.peer || this.peer.destroyed) {
+        resolve({ success: false, error: 'PeerJS signaling unavailable.' });
+        return;
+      }
+
+      let settled = false;
+      const done = (res: { success: boolean; error?: string }) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve(res);
+        }
+      };
+
+      const timeout = setTimeout(() => {
+        try {
+          conn?.close();
+        } catch {}
+        done({
+          success: false,
+          error: `Could not reach Host "${formattedId}". Make sure your friend keeps the DuelVerse room open!`,
+        });
+      }, timeoutMs);
+
+      const conn = this.peer.connect(hostPeerId, { reliable: true });
+      this.hostConnection = conn;
+
+      conn.on('open', () => {
+        this.setStatus('connected_p2p');
+        conn.send({ type: 'JOIN', payload: { player } });
+        this.flushOutboundQueue();
+      });
+
+      conn.on('data', (raw: any) => {
+        const msg = raw as WebRTCMessage;
+        if (!msg) return;
+
+        if (msg.type === 'JOIN_ACK') {
+          if (msg.payload.success) {
+            if (msg.payload.room) {
+              this.latestRemoteRoom = msg.payload.room;
+              this.notifyLocalListeners(formattedId, msg.payload.room);
+            }
+            done({ success: true });
+          } else {
+            done({ success: false, error: msg.payload.error || 'Failed to join room' });
+          }
+        } else if (msg.type === 'ROOM_UPDATE' && msg.payload) {
+          this.latestRemoteRoom = msg.payload;
+          this.notifyLocalListeners(formattedId, msg.payload);
+        }
+      });
+
+      conn.on('close', () => {
+        if (this.activeRoomId === formattedId && !this.isHost) {
+          this.setStatus('reconnecting');
+          this.attemptGuestReconnect();
+        }
+      });
+
+      conn.on('error', (err: any) => {
+        done({ success: false, error: 'Connection failed: ' + (err?.message || 'Host unreachable') });
+      });
+    });
+  }
+
+  private async attemptGuestReconnect() {
+    if (this.isHost || this.isReconnectingGuest || !this.activeRoomId || !this.localPlayer) return;
+    this.isReconnectingGuest = true;
+    const roomId = this.activeRoomId;
+    const player = this.localPlayer;
+
+    for (let i = 0; i < 3; i++) {
+      if (this.hostConnection?.open || !this.activeRoomId || this.activeRoomId !== roomId) break;
+      const res = await this.connectToHostOnce(roomId, player, 4000);
+      if (res.success) break;
+      await new Promise((r) => setTimeout(r, 900));
+    }
+
+    this.isReconnectingGuest = false;
+  }
+
+  private flushOutboundQueue() {
+    if (!this.hostConnection || !this.hostConnection.open) return;
+    while (this.outboundQueue.length > 0) {
+      const msg = this.outboundQueue.shift();
+      if (msg) {
+        try {
+          this.hostConnection.send(msg);
+        } catch {
+          break;
+        }
+      }
+    }
+  }
+
+  private sendToHostOrQueue(msg: WebRTCMessage) {
+    if (this.hostConnection && this.hostConnection.open) {
+      this.hostConnection.send(msg);
+      return true;
+    }
+    if (!this.isHost && this.activeRoomId && this.localPlayer) {
+      if (this.outboundQueue.length < 15) {
+        this.outboundQueue.push(msg);
+      }
+      this.attemptGuestReconnect();
+      return true;
+    }
+    return false;
   }
 
   public async joinRoom(
@@ -233,83 +481,68 @@ export class WebRTCTransport implements IRoomTransport {
 
     const isBot = player.uid === 'bot_rival' || player.uid.startsWith('bot_');
     if (!isBot) {
-      this.localPlayerUid = player.uid;
+      this.localPlayer = player;
     }
 
-    // 1. Try local room first (same computer multi-tab or host adding bot)
+    // 1. Try same-browser local room first (single device 2-tab test or adding CyberBot)
     const localRes = await this.broadcast.joinRoom(formattedId, player);
     if (localRes.success) {
       if (!isBot && !this.isHost) {
         this.isHost = false;
       }
+      this.setStatus(this.isHost ? (this.connections.size > 0 ? 'connected_p2p' : 'hosting') : 'connected_p2p');
       return localRes;
     }
 
-    // 2. If not local, connect via WebRTC to the Host's Peer
+    // 2. Remote mobile/PC over WebRTC PeerJS with auto-retry (handles Host app-switch wakeups!)
     if (!isBot) {
       this.isHost = false;
     }
-    const cleanId = cleanRoomCode(formattedId);
-    const hostPeerId = getHostPeerId(cleanId);
+    this.setStatus('connecting');
 
-    try {
-      const peer = await this.initPeer();
-
-      return new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          resolve({
-            success: false,
-            error: `Room "${formattedId}" not found. Verify the room code or make sure the host has the room open!`
-          });
-        }, 8000);
-
-        const conn = peer.connect(hostPeerId, { reliable: true });
-        this.hostConnection = conn;
-
-        conn.on('open', () => {
-          conn.send({ type: 'JOIN', payload: { player } });
-        });
-
-        conn.on('data', (raw: any) => {
-          const msg = raw as WebRTCMessage;
-          if (!msg) return;
-
-          if (msg.type === 'JOIN_ACK') {
-            clearTimeout(timeout);
-            if (msg.payload.success) {
-              if (msg.payload.room) {
-                this.latestRemoteRoom = msg.payload.room;
-                this.notifyLocalListeners(formattedId, msg.payload.room);
-              }
-              resolve({ success: true });
-            } else {
-              resolve({ success: false, error: msg.payload.error || 'Failed to join room' });
-            }
-          } else if (msg.type === 'ROOM_UPDATE' && msg.payload) {
-            this.latestRemoteRoom = msg.payload;
-            this.notifyLocalListeners(formattedId, msg.payload);
-          }
-        });
-
-        conn.on('error', (err) => {
-          clearTimeout(timeout);
-          resolve({ success: false, error: 'WebRTC Connection error: ' + (err.message || 'Host unreachable') });
-        });
-      });
-    } catch (e: any) {
-      return { success: false, error: e?.message || 'Unable to connect to host over WebRTC' };
+    let lastErr = `Room "${formattedId}" not found. Make sure the host has the room open!`;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await this.connectToHostOnce(formattedId, player, 4200);
+      if (res.success) {
+        this.setStatus('connected_p2p');
+        return res;
+      }
+      if (res.error) lastErr = res.error;
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 700));
+      }
     }
+
+    this.setStatus('idle');
+    this.activeRoomId = null;
+    return { success: false, error: lastErr };
   }
 
   public async leaveRoom(roomId: string, playerUid: string): Promise<void> {
+    this.activeRoomId = null;
+    this.outboundQueue = [];
+    this.latestRemoteRoom = null;
+
     if (this.isHost) {
       await this.broadcast.leaveRoom(roomId, playerUid);
       this.broadcastToGuests({ type: 'LEAVE', payload: { playerUid } });
-    } else if (this.hostConnection && this.hostConnection.open) {
-      this.hostConnection.send({ type: 'LEAVE', payload: { playerUid } });
-      this.hostConnection.close();
+      this.connections.forEach((c) => {
+        try { c.close(); } catch {}
+      });
+      this.connections.clear();
+    } else if (this.hostConnection) {
+      if (this.hostConnection.open) {
+        try {
+          this.hostConnection.send({ type: 'LEAVE', payload: { playerUid } });
+        } catch {}
+      }
+      try {
+        this.hostConnection.close();
+      } catch {}
       this.hostConnection = null;
     }
+
+    this.setStatus('idle');
   }
 
   public subscribe(roomId: string, onUpdate: (room: AuthoritativeRoomState) => void): () => void {
@@ -318,14 +551,11 @@ export class WebRTCTransport implements IRoomTransport {
     }
     this.listeners.get(roomId)!.add(onUpdate);
 
-    // Initial notify from local or remote
     if (this.latestRemoteRoom && this.latestRemoteRoom.roomId === roomId) {
       onUpdate(this.latestRemoteRoom);
     }
 
-    // Subscribe to broadcast transport for host or local guest
     const unsubBroadcast = this.broadcast.subscribe(roomId, (room) => {
-      // Whenever host updates authoritative state, mirror to guests
       if (this.isHost) {
         this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: room });
       }
@@ -351,13 +581,9 @@ export class WebRTCTransport implements IRoomTransport {
   public async dispatchAction(action: RoomAction): Promise<void> {
     if (this.isHost) {
       await this.broadcast.dispatchAction(action);
-      const current = this.broadcast.getStoredRoomDirect(action.roomId);
-      if (current) {
-        this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-      }
-    } else if (this.hostConnection && this.hostConnection.open) {
-      this.hostConnection.send({ type: 'ACTION', payload: { action } });
-    } else {
+      return;
+    }
+    if (!this.sendToHostOrQueue({ type: 'ACTION', payload: { action } })) {
       await this.broadcast.dispatchAction(action);
     }
   }
@@ -365,9 +591,11 @@ export class WebRTCTransport implements IRoomTransport {
   public async sendHeartbeat(roomId: string, playerUid: string): Promise<void> {
     if (this.isHost) {
       await this.broadcast.sendHeartbeat(roomId, playerUid);
-    } else if (this.hostConnection && this.hostConnection.open) {
+      return;
+    }
+    if (this.hostConnection && this.hostConnection.open) {
       this.hostConnection.send({ type: 'HEARTBEAT', payload: { playerUid } });
-    } else {
+    } else if (!this.latestRemoteRoom) {
       await this.broadcast.sendHeartbeat(roomId, playerUid);
     }
   }
@@ -375,13 +603,9 @@ export class WebRTCTransport implements IRoomTransport {
   public async toggleReady(roomId: string, playerUid: string): Promise<void> {
     if (this.isHost) {
       await this.broadcast.toggleReady(roomId, playerUid);
-      const current = this.broadcast.getStoredRoomDirect(roomId);
-      if (current) {
-        this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-      }
-    } else if (this.hostConnection && this.hostConnection.open) {
-      this.hostConnection.send({ type: 'READY', payload: { playerUid } });
-    } else {
+      return;
+    }
+    if (!this.sendToHostOrQueue({ type: 'READY', payload: { playerUid } })) {
       await this.broadcast.toggleReady(roomId, playerUid);
     }
   }
@@ -389,13 +613,9 @@ export class WebRTCTransport implements IRoomTransport {
   public async startGame(roomId: string): Promise<void> {
     if (this.isHost) {
       await this.broadcast.startGame(roomId);
-      const current = this.broadcast.getStoredRoomDirect(roomId);
-      if (current) {
-        this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-      }
-    } else if (this.hostConnection && this.hostConnection.open) {
-      this.hostConnection.send({ type: 'START', payload: {} });
-    } else {
+      return;
+    }
+    if (!this.sendToHostOrQueue({ type: 'START', payload: {} })) {
       await this.broadcast.startGame(roomId);
     }
   }
@@ -403,13 +623,9 @@ export class WebRTCTransport implements IRoomTransport {
   public async voteRematch(roomId: string, playerUid: string): Promise<void> {
     if (this.isHost) {
       await this.broadcast.voteRematch(roomId, playerUid);
-      const current = this.broadcast.getStoredRoomDirect(roomId);
-      if (current) {
-        this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-      }
-    } else if (this.hostConnection && this.hostConnection.open) {
-      this.hostConnection.send({ type: 'REMATCH', payload: { playerUid } });
-    } else {
+      return;
+    }
+    if (!this.sendToHostOrQueue({ type: 'REMATCH', payload: { playerUid } })) {
       await this.broadcast.voteRematch(roomId, playerUid);
     }
   }
@@ -417,13 +633,9 @@ export class WebRTCTransport implements IRoomTransport {
   public async switchGame(roomId: string, newGameId: string): Promise<void> {
     if (this.isHost) {
       await this.broadcast.switchGame(roomId, newGameId);
-      const current = this.broadcast.getStoredRoomDirect(roomId);
-      if (current) {
-        this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-      }
-    } else if (this.hostConnection && this.hostConnection.open) {
-      this.hostConnection.send({ type: 'SWITCH_GAME', payload: { newGameId } });
-    } else {
+      return;
+    }
+    if (!this.sendToHostOrQueue({ type: 'SWITCH_GAME', payload: { newGameId } })) {
       await this.broadcast.switchGame(roomId, newGameId);
     }
   }
@@ -431,13 +643,9 @@ export class WebRTCTransport implements IRoomTransport {
   public async resetRoomToLobby(roomId: string): Promise<void> {
     if (this.isHost) {
       await this.broadcast.resetRoomToLobby(roomId);
-      const current = this.broadcast.getStoredRoomDirect(roomId);
-      if (current) {
-        this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-      }
-    } else if (this.hostConnection && this.hostConnection.open) {
-      this.hostConnection.send({ type: 'RESET_LOBBY', payload: {} });
-    } else {
+      return;
+    }
+    if (!this.sendToHostOrQueue({ type: 'RESET_LOBBY', payload: {} })) {
       await this.broadcast.resetRoomToLobby(roomId);
     }
   }
@@ -445,13 +653,9 @@ export class WebRTCTransport implements IRoomTransport {
   public async updateMatchConfig(roomId: string, maxRounds: number, difficulty?: string): Promise<void> {
     if (this.isHost) {
       await this.broadcast.updateMatchConfig(roomId, maxRounds, difficulty);
-      const current = this.broadcast.getStoredRoomDirect(roomId);
-      if (current) {
-        this.broadcastToGuests({ type: 'ROOM_UPDATE', payload: current });
-      }
-    } else if (this.hostConnection && this.hostConnection.open) {
-      this.hostConnection.send({ type: 'MATCH_CONFIG', payload: { maxRounds, difficulty } as any });
-    } else {
+      return;
+    }
+    if (!this.sendToHostOrQueue({ type: 'MATCH_CONFIG', payload: { maxRounds, difficulty } })) {
       await this.broadcast.updateMatchConfig(roomId, maxRounds, difficulty);
     }
   }

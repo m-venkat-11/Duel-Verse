@@ -58,6 +58,7 @@ export interface AuthoritativeRoomState<TGameSpecificState = any> {
   };
   roundWinnerUid?: string | 'draw' | null;
   matchWinnerUid?: string | 'draw' | null;
+  countdownEndsAt?: number | null;
 }
 
 export interface RoomAction<TPayload = any> {

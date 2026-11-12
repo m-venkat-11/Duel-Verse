@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { getOrCreatePlayerProfile, updatePlayerStats, type LocalPlayerProfile } from './services/player';
 import { soundService } from './services/sound';
-import { activeTransport } from './services/transport';
+import { activeTransport, type TransportConnectionStatus } from './services/transport';
 import type { AuthoritativeRoomState } from './types/room';
 
 import { Header } from './components/Header';
@@ -64,6 +64,11 @@ export function App() {
   const [showQRModal, setShowQRModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showSwitcherModal, setShowSwitcherModal] = useState<boolean>(false);
+  const [connectionStatus, setConnectionStatus] = useState<TransportConnectionStatus>('idle');
+  const [joiningRoomId, setJoiningRoomId] = useState<string | null>(null);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const lastCountdownTsRef = useRef<number>(0);
+  const prevPlayerCountRef = useRef<number>(1);
 
   // Toast notifications state
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -97,6 +102,35 @@ export function App() {
 
   const roomRef = React.useRef<AuthoritativeRoomState | null>(room);
   roomRef.current = room;
+
+  // Subscribe to P2P transport link status
+  useEffect(() => {
+    if (!activeTransport.subscribeStatus) return;
+    return activeTransport.subscribeStatus((status) => setConnectionStatus(status));
+  }, []);
+
+  // Sync 3-2-1 countdown on Guest when Host starts match, and toast on Friend join
+  useEffect(() => {
+    if (!room) {
+      prevPlayerCountRef.current = 0;
+      lastCountdownTsRef.current = 0;
+      return;
+    }
+    const count = Object.keys(room.players).length;
+    if (count > prevPlayerCountRef.current && count >= 2) {
+      const opp = Object.values(room.players).find((p) => p.uid !== profile.uid);
+      if (opp && !opp.uid.includes('bot')) {
+        addToast('success', `${opp.nickname} Joined!`, 'Both phones linked P2P.');
+        soundService.playScore();
+      }
+    }
+    prevPlayerCountRef.current = count;
+
+    if (room.countdownEndsAt && room.countdownEndsAt > lastCountdownTsRef.current && room.status !== 'playing') {
+      lastCountdownTsRef.current = room.countdownEndsAt;
+      setShowCountdown(true);
+    }
+  }, [room?.players, room?.countdownEndsAt, room?.status, profile.uid]);
 
   // Room Subscription & Heartbeat listener
   useEffect(() => {
@@ -363,18 +397,34 @@ export function App() {
         await activeTransport.startGame(newRoomId);
       }
 
-      // Subscribe and set
-      activeTransport.subscribe(newRoomId, (r) => setRoom(r));
+      // Initialize room state cleanly via single managed snapshot without leaking duplicate listeners
+      const snap = activeTransport.getRoomSnapshot?.(newRoomId);
+      if (snap) {
+        setRoom(snap);
+      } else {
+        let initialUnsub: (() => void) | null = null;
+        initialUnsub = activeTransport.subscribe(newRoomId, (r) => {
+          setRoom(r);
+          if (initialUnsub) {
+            initialUnsub();
+            initialUnsub = null;
+          }
+        });
+      }
     } catch (e) {
       console.error('Failed to create room:', e);
+      addToast('warning', 'Room Error', 'Unable to initialize arena room.');
     }
   };
 
-  // Join Room Flow with Automatic Code Normalization
+  // Join Room Flow with Automatic Code Normalization & Visual Reconnect Overlay
   const handleJoinRoom = async (roomId: string) => {
+    const clean = roomId.trim().toUpperCase();
+    const normalizedRoomId = clean.startsWith('DV-') ? clean : `DV-${clean}`;
+    setJoiningRoomId(normalizedRoomId);
+    setJoinError(null);
+
     try {
-      const clean = roomId.trim().toUpperCase();
-      const normalizedRoomId = clean.startsWith('DV-') ? clean : `DV-${clean}`;
       const playerSession = {
         uid: profile.uid,
         nickname: profile.nickname,
@@ -389,14 +439,30 @@ export function App() {
 
       const res = await activeTransport.joinRoom(normalizedRoomId, playerSession);
       if (res.success) {
+        setJoiningRoomId(null);
+        setJoinError(null);
         const newUrl = `${window.location.pathname}?room=${normalizedRoomId}`;
         window.history.pushState({ room: normalizedRoomId }, '', newUrl);
-        activeTransport.subscribe(normalizedRoomId, (r) => setRoom(r));
+
+        const snap = activeTransport.getRoomSnapshot?.(normalizedRoomId);
+        if (snap) {
+          setRoom(snap);
+        } else {
+          let initialUnsub: (() => void) | null = null;
+          initialUnsub = activeTransport.subscribe(normalizedRoomId, (r) => {
+            setRoom(r);
+            if (initialUnsub) {
+              initialUnsub();
+              initialUnsub = null;
+            }
+          });
+        }
       } else {
-        alert(res.error || 'Failed to join room');
+        setJoinError(res.error || 'Could not reach host room.');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to join room:', e);
+      setJoinError(e?.message || 'Connection error while joining room.');
     }
   };
 
@@ -415,16 +481,25 @@ export function App() {
     await activeTransport.toggleReady(room.roomId, profile.uid);
   };
 
-  // Start Game with 3-2-1 Countdown
-  const handleStartGame = () => {
+  // Start Game with Synchronized 3-2-1 Countdown
+  const handleStartGame = async () => {
     if (!room) return;
     setShowCountdown(true);
+    await activeTransport.dispatchAction({
+      type: 'COUNTDOWN_START',
+      roomId: room.roomId,
+      playerUid: profile.uid,
+      payload: {},
+      timestamp: Date.now()
+    });
   };
 
   const handleCountdownComplete = async () => {
     setShowCountdown(false);
     if (!room) return;
-    await activeTransport.startGame(room.roomId);
+    if (room.hostUid === profile.uid) {
+      await activeTransport.startGame(room.roomId);
+    }
   };
 
   // Dispatch game action to authoritative engine
@@ -691,6 +766,7 @@ export function App() {
           <LobbyView
             room={room}
             playerUid={profile.uid}
+            connectionStatus={connectionStatus}
             onToggleReady={handleToggleReady}
             onStartGame={handleStartGame}
             onOpenGameSwitcher={() => setShowSwitcherModal(true)}
@@ -760,6 +836,53 @@ export function App() {
           currentGameId={room.selectedGameId}
           onSelectGame={handleSwitchGame}
         />
+      )}
+
+      {/* P2P Room Connecting / Retry Overlay */}
+      {joiningRoomId && !room && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
+          <div className="glass-panel max-w-sm w-full p-6 rounded-3xl border border-cyan-500/40 text-center shadow-2xl">
+            {!joinError ? (
+              <>
+                <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center mx-auto mb-4">
+                  <span className="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                </div>
+                <h3 className="text-lg font-black font-['Outfit'] text-white">
+                  Connecting to {joiningRoomId}...
+                </h3>
+                <p className="text-xs text-slate-400 mt-2 font-mono">
+                  Linking P2P across devices. Make sure your friend has DuelVerse open!
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="text-3xl mb-3">📡</div>
+                <h3 className="text-lg font-black font-['Outfit'] text-rose-400">
+                  Could Not Reach {joiningRoomId}
+                </h3>
+                <p className="text-xs text-slate-300 mt-2 leading-relaxed">{joinError}</p>
+                <div className="flex gap-2 mt-5">
+                  <button
+                    onClick={() => {
+                      setJoiningRoomId(null);
+                      setJoinError(null);
+                      window.history.pushState({}, '', window.location.pathname);
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300"
+                  >
+                    Home
+                  </button>
+                  <button
+                    onClick={() => handleJoinRoom(joiningRoomId)}
+                    className="flex-1 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-xs font-black text-slate-950"
+                  >
+                    Retry Connect
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Instant Toast Notifications */}

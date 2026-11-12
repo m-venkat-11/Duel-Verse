@@ -11,8 +11,10 @@ export interface SlapDuelState {
   targetScore: number;
   roundWinner: string | null;
   lastActionTimestamp: number;
+  telegraphTimestamp?: number;
+  defenderDodgeUntil?: number;
   lastEvent?: {
-    type: 'slap_hit' | 'dodged' | 'feint' | 'false_dodge' | 'frozen';
+    type: 'slap_hit' | 'dodged' | 'feint' | 'false_dodge' | 'frozen' | 'telegraph';
     actorUid: string;
     timestamp: number;
   } | null;

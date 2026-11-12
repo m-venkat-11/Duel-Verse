@@ -163,9 +163,11 @@ export class BroadcastTransport implements IRoomTransport {
       room.scores[player.uid] = 0;
     }
 
-    // Reinitialize game state for both players
+    // Initialize game state only for fresh lobby join (preserve live match if reconnecting!)
     const playerUids = Object.keys(room.players);
-    room.gameState = initializeGameState(room.selectedGameId, playerUids, room.maxRounds || 3);
+    if (!existingPlayer && (room.status === 'waiting' || room.status === 'ready' || !room.gameState)) {
+      room.gameState = initializeGameState(room.selectedGameId, playerUids, room.maxRounds || 3);
+    }
 
     this.saveAndBroadcast(room);
     return { success: true };
@@ -256,6 +258,7 @@ export class BroadcastTransport implements IRoomTransport {
     room.roundWinnerUid = null;
     room.matchWinnerUid = null;
     room.rematchVotes = {};
+    room.countdownEndsAt = null;
 
     this.saveAndBroadcast(room);
   }
@@ -525,10 +528,39 @@ export class BroadcastTransport implements IRoomTransport {
         break;
       }
 
-      // --- Pong Paddle Move ---
+      // --- Pong Paddle Move (Supports 2D xPos + yPos) & Host Ball Sync ---
       case 'PONG_PADDLE': {
-        const { xPos } = payload;
-        room.gameState = updatePongPaddle(room.gameState, playerUid, xPos);
+        const { xPos, yPos } = payload;
+        if (!room.gameState) room.gameState = {};
+        if (yPos !== undefined) {
+          room.gameState.paddles = {
+            ...room.gameState.paddles,
+            [playerUid]: {
+              x: Math.max(8, Math.min(92, xPos)),
+              y: Math.max(5, Math.min(95, yPos))
+            }
+          };
+        } else {
+          room.gameState = updatePongPaddle(room.gameState, playerUid, xPos);
+        }
+        break;
+      }
+
+      case 'PONG_BALL': {
+        if (!room.gameState) room.gameState = {};
+        room.gameState.ball = {
+          x: payload.x,
+          y: payload.y,
+          vx: payload.vx,
+          vy: payload.vy,
+          speed: payload.speed,
+          ts: Date.now()
+        };
+        break;
+      }
+
+      case 'COUNTDOWN_START': {
+        room.countdownEndsAt = Date.now() + 3000;
         break;
       }
 
@@ -765,12 +797,62 @@ export class BroadcastTransport implements IRoomTransport {
         break;
       }
 
-      // --- Slap Duel Strike ---
+      // --- Slap Duel Online Sync (Telegraph, Feint, Dodge) & Strike ---
+      case 'SLAP_TELEGRAPH': {
+        if (room.gameState) {
+          const now = Date.now();
+          room.gameState = {
+            ...room.gameState,
+            telegraphTimestamp: now,
+            lastActionTimestamp: now,
+            lastEvent: { type: 'telegraph', actorUid: playerUid, timestamp: now }
+          };
+        }
+        break;
+      }
+
+      case 'SLAP_FEINT': {
+        if (room.gameState) {
+          const now = Date.now();
+          room.gameState = {
+            ...room.gameState,
+            lastActionTimestamp: now,
+            lastEvent: { type: 'feint', actorUid: playerUid, timestamp: now }
+          };
+        }
+        break;
+      }
+
+      case 'SLAP_DODGE': {
+        if (room.gameState) {
+          const now = Date.now();
+          const teleTs = room.gameState.telegraphTimestamp || 0;
+          if (now - teleTs < 750) {
+            // Timed cleanly during attacker's swing!
+            room.gameState = {
+              ...room.gameState,
+              defenderDodgeUntil: now + 520,
+              lastActionTimestamp: now,
+              lastEvent: { type: 'dodged', actorUid: playerUid, timestamp: now }
+            };
+          } else {
+            const res = registerFalseDodge(room.gameState, playerUid);
+            room.gameState = res.newState;
+          }
+        }
+        break;
+      }
+
       case 'SLAP_STRIKE': {
         const { attackerUid, isDodging } = payload;
         const targetGoal = room.maxRounds || room.gameState?.targetScore || 3;
-        const res = registerSlapStrike(room.gameState, attackerUid, isDodging, targetGoal);
-        room.gameState = res.newState;
+        const effectiveDodge = Boolean(isDodging) || ((room.gameState?.defenderDodgeUntil || 0) > Date.now());
+        const res = registerSlapStrike(room.gameState, attackerUid, effectiveDodge, targetGoal);
+        room.gameState = {
+          ...res.newState,
+          telegraphTimestamp: 0,
+          defenderDodgeUntil: 0
+        };
 
         if (res.landed && attackerUid && room.players[attackerUid]) {
           room.scores[attackerUid] = (room.scores[attackerUid] || 0) + 1;

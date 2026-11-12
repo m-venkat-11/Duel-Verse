@@ -99,19 +99,31 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({ room, playerUid, onD
     }
   };
 
-  // Sync remote 2P events if playing PvP across tabs
+  // Sync remote 2P events if playing PvP across phones/tabs
   const lastEventTsRef = useRef<number>(0);
   useEffect(() => {
     const ev = gameState.lastEvent;
     if (!ev || ev.timestamp <= lastEventTsRef.current) return;
     lastEventTsRef.current = ev.timestamp;
     if (ev.actorUid !== playerUid) {
-      if (ev.type === 'slap_hit') {
+      if (ev.type === 'telegraph') {
+        opHandRef.current = { pose: 'windup', timer: 0.34, offsetY: 0, scale: 1, rot: 0 };
+        soundService.playClick();
+      } else if (ev.type === 'feint') {
+        opHandRef.current = { pose: 'feint', timer: 0.25, offsetY: 0, scale: 1, rot: 0 };
+        soundService.playClick();
+        ringEffectRef.current = { x: 240, y: 185, r: 12, alpha: 0.75, color: '#22d3ee' };
+      } else if (ev.type === 'slap_hit') {
         opHandRef.current = { pose: 'slap', timer: 0.35, offsetY: 0, scale: 1, rot: 0 };
         myHandRef.current = { pose: 'hit', timer: 0.45, offsetY: 0, scale: 1, rot: 0 };
+        setStatusMsg('💥 YOU GOT SLAPPED!', 900);
+        soundService.playImpact(1.2);
         showBannerEvent(ev);
       } else if (ev.type === 'dodged') {
-        opHandRef.current = { pose: 'dodge', timer: 0.4, offsetY: 0, scale: 1, rot: 0 };
+        opHandRef.current = { pose: 'dodge', timer: 0.42, offsetY: 0, scale: 1, rot: 0 };
+        setStatusMsg('💨 RIVAL DODGED!', 900);
+      } else if (ev.type === 'frozen') {
+        setStatusMsg('❄️ RIVAL FROZEN!', 900);
       }
     }
   }, [gameState.lastEvent, playerUid]);
@@ -121,11 +133,13 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({ room, playerUid, onD
     if (!isAttackerRef.current || activeAttackBusyRef.current) return;
     activeAttackBusyRef.current = true;
 
-    myHandRef.current = { pose: 'slap', timer: 0.38, offsetY: 0, scale: 1, rot: 0 };
-    soundService.playImpact(1.2);
-
-    // If bot is defending, evaluate bot reaction inside active slap window
-    if (isBotPlaying) {
+    if (!isBotPlaying) {
+      // Broadcast wind-up telegraph to opponent's phone so defender can react in real time!
+      myHandRef.current = { pose: 'windup', timer: 0.28, offsetY: 0, scale: 1, rot: 0 };
+      onDispatchActionRef.current('SLAP_TELEGRAPH', { attackerUid: playerUid, actingUid: playerUid });
+    } else {
+      myHandRef.current = { pose: 'slap', timer: 0.38, offsetY: 0, scale: 1, rot: 0 };
+      soundService.playImpact(1.2);
       const botFrozenNow = (gameStateRef.current.frozenUntil?.[p2Uid] || 0) > Date.now();
       if (!botFrozenNow && Math.random() < 0.58) {
         opDodgingWindowUntilRef.current = Date.now() + 420;
@@ -133,11 +147,18 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({ room, playerUid, onD
       }
     }
 
+    const resolveDelay = isBotPlaying ? 170 : 340;
     setTimeout(() => {
+      if (!isBotPlaying) {
+        myHandRef.current = { pose: 'slap', timer: 0.36, offsetY: 0, scale: 1, rot: 0 };
+        soundService.playImpact(1.2);
+      }
       activeAttackBusyRef.current = false;
       const gs = gameStateRef.current;
       const opFrozenNow = (gs.frozenUntil?.[oppUid] || 0) > Date.now();
-      const dodged = opDodgingWindowUntilRef.current > Date.now() && !opFrozenNow;
+      const dodged =
+        !opFrozenNow &&
+        (isBotPlaying ? opDodgingWindowUntilRef.current > Date.now() : (gs.defenderDodgeUntil || 0) > Date.now());
 
       if (dodged) {
         soundService.playFalseStart();
@@ -173,6 +194,11 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({ room, playerUid, onD
     soundService.playClick();
     ringEffectRef.current = { x: 240, y: 290, r: 12, alpha: 0.75, color: '#f59e0b' };
 
+    if (!isBotPlaying) {
+      onDispatchActionRef.current('SLAP_FEINT', { attackerUid: playerUid, actingUid: playerUid });
+      return;
+    }
+
     // Bot might flinch on a feint!
     const botFrozenNow = (gameStateRef.current.frozenUntil?.[p2Uid] || 0) > Date.now();
     if (isBotPlaying && !botFrozenNow && Math.random() < 0.42) {
@@ -201,6 +227,11 @@ export const SlapDuelView: React.FC<SlapDuelViewProps> = ({ room, playerUid, onD
 
     myHandRef.current = { pose: 'dodge', timer: 0.38, offsetY: 0, scale: 1, rot: 0 };
     soundService.playMove();
+
+    if (!isBotPlaying) {
+      onDispatchActionRef.current('SLAP_DODGE', { defenderUid: playerUid, actingUid: playerUid });
+      return;
+    }
 
     if (activeAttackBusyRef.current) {
       // Timed right during attacker's swing!

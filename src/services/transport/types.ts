@@ -1,5 +1,7 @@
 import type { AuthoritativeRoomState, PlayerSession, RoomAction } from '../../types/room';
 
+export type TransportConnectionStatus = 'idle' | 'connecting' | 'hosting' | 'connected_p2p' | 'reconnecting';
+
 export interface IRoomTransport {
   createRoom(hostPlayer: PlayerSession, initialGameId: string, maxRounds?: number): Promise<string>;
   joinRoom(roomId: string, player: PlayerSession): Promise<{ success: boolean; error?: string }>;
@@ -13,4 +15,6 @@ export interface IRoomTransport {
   switchGame(roomId: string, newGameId: string): Promise<void>;
   resetRoomToLobby(roomId: string): Promise<void>;
   updateMatchConfig(roomId: string, maxRounds: number, difficulty?: string): Promise<void>;
+  subscribeStatus?: (cb: (status: TransportConnectionStatus) => void) => () => void;
+  getRoomSnapshot?: (roomId: string) => AuthoritativeRoomState | null;
 }

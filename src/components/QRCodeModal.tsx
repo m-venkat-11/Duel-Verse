@@ -12,15 +12,19 @@ interface QRCodeModalProps {
 export const QRCodeModal: React.FC<QRCodeModalProps> = ({ roomId, isOpen, onClose }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [copied, setCopied] = React.useState(false);
-  const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-  const [useLanIp, setUseLanIp] = React.useState(isLocalhost);
-  const detectedLanIp = '172.17.188.91:5173';
+  const isLocalhost =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const [customHost, setCustomHost] = React.useState(() =>
+    typeof window !== 'undefined' ? window.location.host : 'localhost:5173'
+  );
 
-  const baseOrigin = typeof window !== 'undefined'
-    ? isLocalhost && useLanIp
-      ? `http://${detectedLanIp}`
-      : window.location.origin
-    : `https://duelverse.app`;
+  const baseOrigin =
+    typeof window !== 'undefined'
+      ? isLocalhost
+        ? `${window.location.protocol}//${customHost.trim() || window.location.host}`
+        : window.location.origin
+      : 'https://duel-verse.vercel.app';
 
   const joinUrl = `${baseOrigin}${typeof window !== 'undefined' ? window.location.pathname : ''}?room=${roomId}`;
 
@@ -82,13 +86,17 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({ roomId, isOpen, onClos
         </div>
 
         {isLocalhost && (
-          <div className="mb-3 flex items-center justify-center gap-2">
-            <button
-              onClick={() => setUseLanIp(!useLanIp)}
-              className="text-[11px] font-mono px-3 py-1 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-300 transition"
-            >
-              {useLanIp ? '📶 Wi-Fi Phone Scan (172.17.188.91)' : '💻 Localhost'}
-            </button>
+          <div className="mb-3 flex flex-col items-center gap-1.5">
+            <label className="text-[10px] font-mono text-cyan-300 uppercase font-bold">
+              LAN IP:Port for same Wi-Fi Phone Scan:
+            </label>
+            <input
+              type="text"
+              value={customHost}
+              onChange={(e) => setCustomHost(e.target.value)}
+              placeholder="e.g. 192.168.1.5:5173"
+              className="w-48 text-center text-xs font-mono px-3 py-1.5 rounded-xl bg-slate-900 border border-cyan-500/40 text-cyan-200 focus:outline-none focus:border-cyan-400"
+            />
           </div>
         )}
 
