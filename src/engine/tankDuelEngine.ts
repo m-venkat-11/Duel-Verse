@@ -30,7 +30,8 @@ export function createTankDuelInitialState(playerUids: string[], targetScore: nu
 export function registerTankKill(
   state: TankDuelState,
   killerUid: string,
-  victimUid: string
+  victimUid: string,
+  overrideTargetScore?: number
 ): {
   newState: TankDuelState;
   matchOver: boolean;
@@ -41,17 +42,25 @@ export function registerTankKill(
     [killerUid]: (state.scores[killerUid] || 0) + 1
   };
 
-  const matchOver = nextScores[killerUid] >= state.targetScore;
+  const goal = overrideTargetScore || state.targetScore || 3;
+  const matchOver = nextScores[killerUid] >= goal;
 
   return {
     newState: {
       ...state,
       scores: nextScores,
       roundWinner: killerUid,
-      roundNumber: state.roundNumber + 1,
       lastKillTimestamp: Date.now()
     },
     matchOver,
     matchWinnerUid: matchOver ? killerUid : null
+  };
+}
+
+export function resetTankDuelRound(state: TankDuelState): TankDuelState {
+  return {
+    ...state,
+    roundWinner: null,
+    roundNumber: (state.roundNumber || 1) + 1
   };
 }

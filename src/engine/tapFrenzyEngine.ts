@@ -10,6 +10,9 @@ export interface TapFrenzyState {
   targetWins: number;
   scores: Record<string, number>;
   lastTapTimestamp: number;
+  lastPushBy?: string | null;
+  roundStartedAt: number;
+  roundDuration: number; // seconds
 }
 
 export function createTapFrenzyInitialState(playerUids: string[], targetWins: number = 3): TapFrenzyState {
@@ -29,7 +32,10 @@ export function createTapFrenzyInitialState(playerUids: string[], targetWins: nu
     roundNumber: 1,
     targetWins,
     scores,
-    lastTapTimestamp: Date.now()
+    lastTapTimestamp: Date.now(),
+    lastPushBy: null,
+    roundStartedAt: Date.now(),
+    roundDuration: 25
   };
 }
 
@@ -37,7 +43,8 @@ export function registerTugTap(
   state: TapFrenzyState,
   playerUid: string,
   p1Uid: string,
-  multiplier: number = 1.0
+  multiplier: number = 1.0,
+  allPlayerUids: string[] = []
 ): {
   newState: TapFrenzyState;
   roundOver: boolean;
@@ -56,7 +63,7 @@ export function registerTugTap(
   }
 
   const isP1 = playerUid === p1Uid;
-  const pushDelta = (isP1 ? -5.2 : 5.2) * multiplier;
+  const pushDelta = (isP1 ? -5.5 : 5.5) * multiplier;
   const nextPos = Math.max(-100, Math.min(100, state.tugPosition + pushDelta));
 
   const nextP1Taps = isP1 ? state.p1Taps + 1 : state.p1Taps;
@@ -67,10 +74,12 @@ export function registerTugTap(
   let matchOver = false;
   let matchWinnerUid: string | null = null;
 
-  let nextScores = { ...state.scores };
+  const nextScores = { ...state.scores };
+  allPlayerUids.forEach((uid) => {
+    if (nextScores[uid] === undefined) nextScores[uid] = 0;
+  });
 
   if (nextPos <= -100) {
-    // P1 wins round
     roundOver = true;
     roundWinnerUid = p1Uid;
     nextScores[p1Uid] = (nextScores[p1Uid] || 0) + 1;
@@ -79,8 +88,10 @@ export function registerTugTap(
       matchWinnerUid = p1Uid;
     }
   } else if (nextPos >= 100) {
-    // P2 wins round
-    const p2Uid = Object.keys(state.scores).find((uid) => uid !== p1Uid) || 'p2';
+    const p2Uid =
+      allPlayerUids.find((uid) => uid !== p1Uid) ||
+      Object.keys(nextScores).find((uid) => uid !== p1Uid) ||
+      playerUid;
     roundOver = true;
     roundWinnerUid = p2Uid;
     nextScores[p2Uid] = (nextScores[p2Uid] || 0) + 1;
@@ -98,7 +109,8 @@ export function registerTugTap(
       p2Taps: nextP2Taps,
       roundWinner: roundWinnerUid,
       scores: nextScores,
-      lastTapTimestamp: Date.now()
+      lastTapTimestamp: Date.now(),
+      lastPushBy: playerUid
     },
     roundOver,
     roundWinnerUid,
@@ -107,11 +119,65 @@ export function registerTugTap(
   };
 }
 
+export function resolveTapWarTimeout(
+  state: TapFrenzyState,
+  p1Uid: string,
+  p2Uid: string
+): {
+  newState: TapFrenzyState;
+  roundOver: boolean;
+  roundWinnerUid: string | null;
+  matchOver: boolean;
+  matchWinnerUid: string | null;
+} {
+  if (state.roundWinner !== null) {
+    return {
+      newState: state,
+      roundOver: false,
+      roundWinnerUid: null,
+      matchOver: false,
+      matchWinnerUid: null
+    };
+  }
+
+  // If dead even at 0, stay in Sudden Death until next tap breaks the tie
+  if (Math.abs(state.tugPosition) < 0.01) {
+    return {
+      newState: state,
+      roundOver: false,
+      roundWinnerUid: null,
+      matchOver: false,
+      matchWinnerUid: null
+    };
+  }
+
+  const winnerUid = state.tugPosition < 0 ? p1Uid : p2Uid;
+  const nextScores = {
+    ...state.scores,
+    [winnerUid]: (state.scores[winnerUid] || 0) + 1
+  };
+  const matchOver = nextScores[winnerUid] >= state.targetWins;
+
+  return {
+    newState: {
+      ...state,
+      roundWinner: winnerUid,
+      scores: nextScores
+    },
+    roundOver: true,
+    roundWinnerUid: winnerUid,
+    matchOver,
+    matchWinnerUid: matchOver ? winnerUid : null
+  };
+}
+
 export function resetTapWarRound(state: TapFrenzyState): TapFrenzyState {
   return {
     ...state,
     tugPosition: 0,
     roundWinner: null,
-    roundNumber: state.roundNumber + 1
+    roundNumber: state.roundNumber + 1,
+    lastPushBy: null,
+    roundStartedAt: Date.now()
   };
 }

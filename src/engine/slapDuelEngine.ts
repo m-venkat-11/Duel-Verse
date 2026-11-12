@@ -8,12 +8,17 @@ export interface SlapDuelState {
   falseDodges: Record<string, number>;
   frozenUntil: Record<string, number>;
   scores: Record<string, number>;
-  targetScore: number; // 5
+  targetScore: number;
   roundWinner: string | null;
   lastActionTimestamp: number;
+  lastEvent?: {
+    type: 'slap_hit' | 'dodged' | 'feint' | 'false_dodge' | 'frozen';
+    actorUid: string;
+    timestamp: number;
+  } | null;
 }
 
-export function createSlapDuelInitialState(playerUids: string[], targetScore: number = 5): SlapDuelState {
+export function createSlapDuelInitialState(playerUids: string[], targetScore: number = 3): SlapDuelState {
   const p1 = playerUids[0] || 'p1';
   const p2 = playerUids[1] || 'p2';
 
@@ -31,7 +36,8 @@ export function createSlapDuelInitialState(playerUids: string[], targetScore: nu
     scores,
     targetScore,
     roundWinner: null,
-    lastActionTimestamp: Date.now()
+    lastActionTimestamp: Date.now(),
+    lastEvent: null
   };
 }
 
@@ -45,7 +51,7 @@ export function registerFalseDodge(
 } {
   const currentStrikes = (state.falseDodges[defenderUid] || 0) + 1;
   const isFrozen = currentStrikes >= 3;
-  const nextFrozenUntil = isFrozen ? Date.now() + 2000 : (state.frozenUntil[defenderUid] || 0);
+  const nextFrozenUntil = isFrozen ? Date.now() + 2400 : (state.frozenUntil[defenderUid] || 0);
 
   return {
     newState: {
@@ -58,7 +64,12 @@ export function registerFalseDodge(
         ...state.frozenUntil,
         [defenderUid]: nextFrozenUntil
       },
-      lastActionTimestamp: Date.now()
+      lastActionTimestamp: Date.now(),
+      lastEvent: {
+        type: isFrozen ? 'frozen' : 'false_dodge',
+        actorUid: defenderUid,
+        timestamp: Date.now()
+      }
     },
     frozen: isFrozen,
     strikes: isFrozen ? 3 : currentStrikes
@@ -68,22 +79,25 @@ export function registerFalseDodge(
 export function registerSlapStrike(
   state: SlapDuelState,
   attackerUid: string,
-  isDodging: boolean
+  isDodging: boolean,
+  overrideTargetScore?: number
 ): {
   newState: SlapDuelState;
   landed: boolean;
   matchOver: boolean;
   matchWinnerUid: string | null;
 } {
-  const p1Uid = Object.keys(state.scores)[0];
+  const uids = Object.keys(state.scores);
+  const p1Uid = uids[0];
+  const p2Uid = uids[1] || 'p2';
   const isP1Attacker = attackerUid === p1Uid;
-  const defenderUid = isP1Attacker ? Object.keys(state.scores)[1] : p1Uid;
+  const defenderUid = isP1Attacker ? p2Uid : p1Uid;
 
   const isDefenderFrozen = (state.frozenUntil[defenderUid] || 0) > Date.now();
   const effectiveDodged = isDodging && !isDefenderFrozen;
 
   if (effectiveDodged) {
-    // Defender successfully dodged! Roles swap!
+    // Defender successfully dodged -> roles swap!
     return {
       newState: {
         ...state,
@@ -91,29 +105,44 @@ export function registerSlapStrike(
         defenderUid: attackerUid,
         p1HandState: 'idle',
         p2HandState: 'idle',
-        falseDodges: { [p1Uid]: 0, [defenderUid]: 0 },
-        lastActionTimestamp: Date.now()
+        falseDodges: { [p1Uid]: 0, [p2Uid]: 0 },
+        lastActionTimestamp: Date.now(),
+        lastEvent: {
+          type: 'dodged',
+          actorUid: defenderUid,
+          timestamp: Date.now()
+        }
       },
       landed: false,
       matchOver: false,
       matchWinnerUid: null
     };
   } else {
-    // Slap landed! Attacker scores!
+    // Slap landed! Attacker scores + clears defender freeze if any
     const nextScores = {
       ...state.scores,
       [attackerUid]: (state.scores[attackerUid] || 0) + 1
     };
 
-    const matchOver = nextScores[attackerUid] >= state.targetScore;
+    const goal = overrideTargetScore || state.targetScore || 3;
+    const matchOver = nextScores[attackerUid] >= goal;
 
     return {
       newState: {
         ...state,
         scores: nextScores,
+        frozenUntil: {
+          ...state.frozenUntil,
+          [defenderUid]: 0
+        },
         p1HandState: isP1Attacker ? 'slapping' : 'slapped',
         p2HandState: isP1Attacker ? 'slapped' : 'slapping',
-        lastActionTimestamp: Date.now()
+        lastActionTimestamp: Date.now(),
+        lastEvent: {
+          type: 'slap_hit',
+          actorUid: attackerUid,
+          timestamp: Date.now()
+        }
       },
       landed: true,
       matchOver,

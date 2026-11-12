@@ -1,5 +1,5 @@
 export interface StuckBlade {
-  angle: number; // Angle on target wheel (0 to 2*PI)
+  angle: number; // Angle in wheel local coordinates: 0 = bottom (+Y) when wheelAngle = 0, PI = top (-Y)
   ownerUid: string;
 }
 
@@ -13,9 +13,16 @@ export interface KnifeMasterState {
   targetScore: number;
   roundWinner: string | null;
   roundNumber: number;
+  lastClash?: {
+    playerUid: string;
+    timestamp: number;
+  } | null;
 }
 
-export function createKnifeMasterInitialState(playerUids: string[], targetScore: number = 3): KnifeMasterState {
+export function createKnifeMasterInitialState(
+  playerUids: string[],
+  targetScore: number = 3
+): KnifeMasterState {
   const p1 = playerUids[0] || 'p1';
   const p2 = playerUids[1] || 'p2';
 
@@ -25,16 +32,60 @@ export function createKnifeMasterInitialState(playerUids: string[], targetScore:
     wheelAngle: 0,
     rotationSpeed: 0.035,
     stuckBlades: [
-      { angle: 0, ownerUid: 'obstacle' },
-      { angle: Math.PI, ownerUid: 'obstacle' }
+      { angle: Math.PI / 2, ownerUid: 'obstacle' },
+      { angle: (3 * Math.PI) / 2, ownerUid: 'obstacle' }
     ],
     p1KnivesLeft: 7,
     p2KnivesLeft: 7,
     scores,
     targetScore,
     roundWinner: null,
-    roundNumber: 1
+    roundNumber: 1,
+    lastClash: null
   };
+}
+
+export function resetKnifeMasterRound(
+  state: KnifeMasterState,
+  playerUids: string[]
+): KnifeMasterState {
+  const p1 = playerUids[0] || Object.keys(state.scores)[0] || 'p1';
+  const p2 = playerUids[1] || Object.keys(state.scores)[1] || 'p2';
+  const scores = { ...state.scores };
+  if (scores[p1] === undefined) scores[p1] = 0;
+  if (scores[p2] === undefined) scores[p2] = 0;
+
+  // Alternate obstacle angles each round for variety
+  const roundNum = (state.roundNumber || 1) + 1;
+  const baseOffset = (roundNum % 3) * (Math.PI / 6);
+
+  return {
+    ...state,
+    wheelAngle: 0,
+    rotationSpeed: 0.035,
+    stuckBlades: [
+      { angle: Math.PI / 2 + baseOffset, ownerUid: 'obstacle' },
+      { angle: (3 * Math.PI) / 2 + baseOffset, ownerUid: 'obstacle' }
+    ],
+    p1KnivesLeft: 7,
+    p2KnivesLeft: 7,
+    scores,
+    roundWinner: null,
+    roundNumber: roundNum,
+    lastClash: null
+  };
+}
+
+export function normalizeAngle(a: number): number {
+  let res = a % (Math.PI * 2);
+  if (res < 0) res += Math.PI * 2;
+  return res;
+}
+
+export function angleDiff(a: number, b: number): number {
+  let diff = Math.abs(normalizeAngle(a) - normalizeAngle(b));
+  if (diff > Math.PI) diff = Math.PI * 2 - diff;
+  return diff;
 }
 
 export function registerKnifeThrow(
@@ -49,29 +100,41 @@ export function registerKnifeThrow(
   matchOver: boolean;
   matchWinnerUid: string | null;
 } {
-  const p1Uid = Object.keys(state.scores)[0];
+  if (state.roundWinner !== null) {
+    return {
+      newState: state,
+      success: false,
+      roundOver: false,
+      roundWinnerUid: null,
+      matchOver: false,
+      matchWinnerUid: null
+    };
+  }
+
+  const uids = Object.keys(state.scores);
+  const p1Uid = uids[0];
+  const p2Uid = uids[1] || 'p2';
   const isP1 = playerUid === p1Uid;
-  const p2Uid = Object.keys(state.scores)[1] || 'p2';
 
-  // P1 throws upward hitting at Math.PI / 2; P2 throws downward hitting at -Math.PI / 2
-  const contactAngle = isP1 ? Math.PI / 2 : -Math.PI / 2;
-  const hitAngle = (contactAngle - wheelAngleAtImpact) % (Math.PI * 2);
-  const normalizedHitAngle = hitAngle < 0 ? hitAngle + Math.PI * 2 : hitAngle;
+  // In Canvas local wheel coordinates, blade.angle = 0 draws vertically DOWN (+Y = bottom of wheel)
+  // and blade.angle = Math.PI draws vertically UP (-Y = top of wheel).
+  // P1 throws UP from bottom hitting local wheel angle (0 - wheelAngleAtImpact).
+  // P2 throws DOWN from top hitting local wheel angle (Math.PI - wheelAngleAtImpact).
+  const contactAngle = isP1 ? 0 : Math.PI;
+  const normalizedHitAngle = normalizeAngle(contactAngle - wheelAngleAtImpact);
 
-  // Collision tolerance ~ 0.28 radians (~16 degrees)
-  const TOLERANCE = 0.28;
+  // Collision tolerance ~ 0.24 radians (~13.7 degrees) matching visual blade + guard width
+  const TOLERANCE = 0.24;
   let clashed = false;
   for (const blade of state.stuckBlades) {
-    let diff = Math.abs(blade.angle - normalizedHitAngle);
-    while (diff > Math.PI) diff = Math.abs(diff - Math.PI * 2);
-    if (diff < TOLERANCE) {
+    if (angleDiff(blade.angle, normalizedHitAngle) < TOLERANCE) {
       clashed = true;
       break;
     }
   }
 
   if (clashed) {
-    // Round lost! Opponent scores round
+    // Blade clashed! Opponent wins the round
     const victorUid = isP1 ? p2Uid : p1Uid;
     const nextScores = {
       ...state.scores,
@@ -83,7 +146,8 @@ export function registerKnifeThrow(
       newState: {
         ...state,
         scores: nextScores,
-        roundWinner: victorUid
+        roundWinner: victorUid,
+        lastClash: { playerUid, timestamp: Date.now() }
       },
       success: false,
       roundOver: true,
@@ -92,7 +156,7 @@ export function registerKnifeThrow(
       matchWinnerUid: matchOver ? victorUid : null
     };
   } else {
-    // Knife sticks!
+    // Blade sticks cleanly into the cyber wheel!
     const nextStuck = [...state.stuckBlades, { angle: normalizedHitAngle, ownerUid: playerUid }];
     const nextP1Left = isP1 ? Math.max(0, state.p1KnivesLeft - 1) : state.p1KnivesLeft;
     const nextP2Left = !isP1 ? Math.max(0, state.p2KnivesLeft - 1) : state.p2KnivesLeft;
@@ -101,9 +165,8 @@ export function registerKnifeThrow(
     let roundWinnerUid: string | null = null;
     let matchOver = false;
     let matchWinnerUid: string | null = null;
-    let nextScores = { ...state.scores };
+    const nextScores = { ...state.scores };
 
-    // If player depleted all knives without hitting another knife -> win round!
     if ((isP1 && nextP1Left === 0) || (!isP1 && nextP2Left === 0)) {
       roundOver = true;
       roundWinnerUid = playerUid;

@@ -8,11 +8,11 @@ import { registerReactionTap, resetReactionNextRound } from '../../engine/reacti
 import { updatePongPaddle, stepPongPhysics, resetPongServe } from '../../engine/pongEngine';
 import { flipMemoryCard, clearPlayerFlips } from '../../engine/memoryMatchEngine';
 import { submitBlitzAnswer } from '../../engine/numberBlitzEngine';
-import { registerTugTap, resetTapWarRound } from '../../engine/tapFrenzyEngine';
+import { registerTugTap, resetTapWarRound, resolveTapWarTimeout } from '../../engine/tapFrenzyEngine';
 import { switchRunnerLane, registerRunnerFinish, createObstacleRushInitialState } from '../../engine/obstacleRushEngine';
-import { registerTankKill } from '../../engine/tankDuelEngine';
+import { registerTankKill, resetTankDuelRound } from '../../engine/tankDuelEngine';
 import { registerSlapStrike, registerFalseDodge } from '../../engine/slapDuelEngine';
-import { registerKnifeThrow, createKnifeMasterInitialState } from '../../engine/knifeMasterEngine';
+import { registerKnifeThrow, resetKnifeMasterRound } from '../../engine/knifeMasterEngine';
 import { registerSumoRingOut } from '../../engine/sumoSpinEngine';
 import {
   setLuckyDiceCount,
@@ -536,13 +536,24 @@ export class BroadcastTransport implements IRoomTransport {
       case 'TANK_KILL':
       case 'TANK_HIT': {
         const { killerUid, victimUid } = payload;
-        const res = registerTankKill(room.gameState, killerUid, victimUid);
+        const targetGoal = room.maxRounds || room.gameState?.targetScore || 3;
+        const res = registerTankKill(room.gameState, killerUid, victimUid, targetGoal);
         room.gameState = res.newState;
         if (killerUid && room.players[killerUid]) {
           room.scores[killerUid] = (room.scores[killerUid] || 0) + 1;
-          if (res.matchOver) {
+          if (res.matchOver || room.scores[killerUid] >= targetGoal) {
             room.status = 'match_end';
-            room.matchWinnerUid = res.matchWinnerUid;
+            room.matchWinnerUid = res.matchWinnerUid || killerUid;
+          } else {
+            setTimeout(() => {
+              const currentRoom = this.getStoredRoom(action.roomId);
+              if (currentRoom && currentRoom.status === 'playing') {
+                currentRoom.currentRound += 1;
+                currentRoom.roundWinnerUid = null;
+                currentRoom.gameState = resetTankDuelRound(currentRoom.gameState);
+                this.saveAndBroadcast(currentRoom);
+              }
+            }, 1800);
           }
         }
         break;
@@ -627,16 +638,44 @@ export class BroadcastTransport implements IRoomTransport {
       case 'FRENZY_TAP':
       case 'TAPFRENZY_TAP': {
         const { p1Uid, multiplier } = payload;
-        const res = registerTugTap(room.gameState, playerUid, p1Uid || playerUids[0], multiplier || 1.0);
+        const res = registerTugTap(room.gameState, playerUid, p1Uid || playerUids[0], multiplier || 1.0, playerUids);
         room.gameState = res.newState;
 
         if (res.roundOver && res.roundWinnerUid) {
           room.scores[res.roundWinnerUid] = (room.scores[res.roundWinnerUid] || 0) + 1;
-          if (res.matchOver) {
+          const targetWins = room.maxRounds || room.gameState?.targetWins || 3;
+          if (res.matchOver || room.scores[res.roundWinnerUid] >= targetWins) {
             room.status = 'match_end';
-            room.matchWinnerUid = res.matchWinnerUid;
+            room.matchWinnerUid = res.matchWinnerUid || res.roundWinnerUid;
           } else {
             // Auto-advance round after 1.6s
+            setTimeout(() => {
+              const currentRoom = this.getStoredRoom(action.roomId);
+              if (currentRoom && currentRoom.status === 'playing') {
+                currentRoom.currentRound += 1;
+                currentRoom.roundWinnerUid = null;
+                currentRoom.gameState = resetTapWarRound(currentRoom.gameState);
+                this.saveAndBroadcast(currentRoom);
+              }
+            }, 1600);
+          }
+        }
+        break;
+      }
+
+      case 'TAP_WAR_TIMEOUT': {
+        const p1 = playerUids[0] || 'p1';
+        const p2 = playerUids[1] || 'bot_rival';
+        const res = resolveTapWarTimeout(room.gameState, p1, p2);
+        room.gameState = res.newState;
+
+        if (res.roundOver && res.roundWinnerUid) {
+          room.scores[res.roundWinnerUid] = (room.scores[res.roundWinnerUid] || 0) + 1;
+          const targetWins = room.maxRounds || room.gameState?.targetWins || 3;
+          if (res.matchOver || room.scores[res.roundWinnerUid] >= targetWins) {
+            room.status = 'match_end';
+            room.matchWinnerUid = res.matchWinnerUid || res.roundWinnerUid;
+          } else {
             setTimeout(() => {
               const currentRoom = this.getStoredRoom(action.roomId);
               if (currentRoom && currentRoom.status === 'playing') {
@@ -700,14 +739,15 @@ export class BroadcastTransport implements IRoomTransport {
       // --- Slap Duel Strike ---
       case 'SLAP_STRIKE': {
         const { attackerUid, isDodging } = payload;
-        const res = registerSlapStrike(room.gameState, attackerUid, isDodging);
+        const targetGoal = room.maxRounds || room.gameState?.targetScore || 3;
+        const res = registerSlapStrike(room.gameState, attackerUid, isDodging, targetGoal);
         room.gameState = res.newState;
 
         if (res.landed && attackerUid && room.players[attackerUid]) {
           room.scores[attackerUid] = (room.scores[attackerUid] || 0) + 1;
-          if (res.matchOver) {
+          if (res.matchOver || room.scores[attackerUid] >= targetGoal) {
             room.status = 'match_end';
-            room.matchWinnerUid = res.matchWinnerUid;
+            room.matchWinnerUid = res.matchWinnerUid || attackerUid;
           }
         }
         break;
@@ -729,15 +769,18 @@ export class BroadcastTransport implements IRoomTransport {
 
         if (res.roundOver && res.roundWinnerUid) {
           room.scores[res.roundWinnerUid] = (room.scores[res.roundWinnerUid] || 0) + 1;
-          if (res.matchOver) {
+          const targetGoal = room.maxRounds || room.gameState?.targetScore || 3;
+          if (res.matchOver || room.scores[res.roundWinnerUid] >= targetGoal) {
             room.status = 'match_end';
-            room.matchWinnerUid = res.matchWinnerUid;
+            room.matchWinnerUid = res.matchWinnerUid || res.roundWinnerUid;
           } else {
-            // Reset blades for next round after 1.8s
+            // Reset blades for next round after 1.8s while preserving scores!
             setTimeout(() => {
               const currentRoom = this.getStoredRoom(action.roomId);
               if (currentRoom && currentRoom.status === 'playing') {
-                currentRoom.gameState = createKnifeMasterInitialState(playerUids, currentRoom.gameState.targetScore);
+                currentRoom.currentRound += 1;
+                currentRoom.roundWinnerUid = null;
+                currentRoom.gameState = resetKnifeMasterRound(currentRoom.gameState, playerUids);
                 this.saveAndBroadcast(currentRoom);
               }
             }, 1800);
